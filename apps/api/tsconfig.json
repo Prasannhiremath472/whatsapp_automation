@@ -1,0 +1,20 @@
+{
+  "extends": "@whatsapp-crm/tsconfig-base/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "baseUrl": "./",
+    /* Nest relies on decorator metadata reflection; the shared base config
+       does not enable these, so they are overridden locally. */
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "allowJs": true,
+    "incremental": true,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "paths": {
+      "@whatsapp-crm/shared-types": ["../../packages/shared-types/src"]
+    }
+  },
+  "include": ["src", "test"],
+  "exclude": ["node_modules", "dist"]
+}

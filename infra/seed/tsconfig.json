@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "resolveJsonModule": true,
+    "outDir": "dist",
+    "types": ["node"],
+    "typeRoots": ["../../apps/api/node_modules/@types", "../../node_modules/@types"],
+    "baseUrl": "../../apps/api",
+    "paths": {
+      "@prisma/client": ["node_modules/@prisma/client"],
+      "dotenv": ["node_modules/dotenv"],
+      "bcrypt": ["node_modules/bcrypt"]
+    }
+  },
+  "include": ["seed.ts"]
+}

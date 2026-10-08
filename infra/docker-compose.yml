@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: whatsapp_crm_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: whatsapp_crm_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - whatsapp_crm_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: whatsapp_crm_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    # Not consumed by application code until M2+ (queues/cache), present now
+    # per the infra plan.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  whatsapp_crm_postgres_data:

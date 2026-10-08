@@ -1,0 +1,515 @@
+// Milestone 1 schema.
+// ONLY Tenant / User / RefreshToken exist here. Business tables (contacts,
+// messages, conversations, etc.) come in later milestones — see
+// prisma-tenant-client.ts for the isolation seam they will plug into.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  active
+  suspended
+  pending_onboarding
+}
+
+enum UserRole {
+  super_admin
+  tenant_admin
+  agent
+}
+
+model Tenant {
+  id                  String       @id @default(uuid())
+  name                String
+  slug                String       @unique
+  business_category   String?
+  status              TenantStatus @default(pending_onboarding)
+  commerceBotEnabled  Boolean      @default(false)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  users User[]
+
+  whatsappConnection    WhatsappConnection?
+  contacts              Contact[]
+  conversations         Conversation[]
+  messages              Message[]
+  broadcastTemplates    BroadcastTemplate[]
+  broadcastCampaigns    BroadcastCampaign[]
+  botSessions           BotSession[]
+  machineCategories     MachineCategory[]
+  machines              Machine[]
+  machineConfigGroups   MachineConfigGroup[]
+  machineConfigOptions  MachineConfigOption[]
+  orders                Order[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  tenantId     String?
+  tenant       Tenant?   @relation(fields: [tenantId], references: [id])
+  email        String
+  passwordHash String
+  role         UserRole  @default(agent)
+  displayName  String
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  refreshTokens RefreshToken[]
+
+  assignedConversations Conversation[]
+  sentMessages          Message[]
+  createdCampaigns      BroadcastCampaign[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Milestone 2: WhatsApp webhook + router + mock provider.
+//
+// All models below are tenant-scoped business data (see prisma-tenant-client.ts
+// for the isolation seam). tenantId is always set explicitly server-side from
+// the caller's JWT on creates — never trusted from the request body.
+// ---------------------------------------------------------------------------
+
+enum WhatsappConnectionStatus {
+  connected
+  disconnected
+  pending
+}
+
+model WhatsappConnection {
+  id                   String                    @id @default(uuid())
+  tenantId             String                    @unique
+  tenant               Tenant                    @relation(fields: [tenantId], references: [id])
+  wabaId               String?
+  phoneNumberId        String                    @unique
+  displayPhoneNumber   String?
+  accessTokenEncrypted String?                   @db.Text
+  tokenExpiresAt       DateTime?
+  connectionStatus     WhatsappConnectionStatus  @default(pending)
+  isMock               Boolean                   @default(true)
+  webhookVerifyToken   String?
+  connectedAt          DateTime?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  conversations Conversation[]
+
+  @@index([tenantId])
+  @@map("whatsapp_connections")
+}
+
+model Contact {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  waId        String
+  displayName String?
+  profileName String?
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  conversations         Conversation[]
+  broadcastRecipiencies BroadcastRecipient[]
+  botSessions           BotSession[]
+  orders                Order[]
+
+  @@unique([tenantId, waId])
+  @@index([tenantId])
+  @@map("contacts")
+}
+
+enum ConversationStatus {
+  open
+  pending
+  closed
+}
+
+model Conversation {
+  id                   String              @id @default(uuid())
+  tenantId             String
+  tenant               Tenant              @relation(fields: [tenantId], references: [id])
+  contactId            String
+  contact              Contact             @relation(fields: [contactId], references: [id])
+  whatsappConnectionId String
+  whatsappConnection   WhatsappConnection  @relation(fields: [whatsappConnectionId], references: [id])
+  status               ConversationStatus  @default(open)
+  assignedAgentId      String?
+  assignedAgent        User?               @relation(fields: [assignedAgentId], references: [id])
+  lastMessageAt        DateTime?
+  unreadCount          Int                 @default(0)
+  windowExpiresAt      DateTime?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  messages    Message[]
+  botSession  BotSession?
+  orders      Order[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, lastMessageAt])
+  @@index([contactId])
+  @@index([whatsappConnectionId])
+  @@map("conversations")
+}
+
+enum MessageDirection {
+  inbound
+  outbound
+}
+
+enum MessageSenderType {
+  customer
+  agent
+  bot
+  system
+}
+
+enum MessageType {
+  text
+  image
+  document
+  audio
+  video
+  interactive_button
+  interactive_list
+  template
+}
+
+enum MessageStatus {
+  queued
+  sent
+  delivered
+  read
+  failed
+}
+
+// `content` shape varies by messageType (documented here, not enforced by
+// the DB — validate at the application boundary):
+//   text                -> { body: string }
+//   image                -> { mediaId: string, caption?: string, mimeType?: string }
+//   document              -> { mediaId: string, caption?: string, filename?: string, mimeType?: string }
+//   audio                 -> { mediaId: string, mimeType?: string }
+//   video                 -> { mediaId: string, caption?: string, mimeType?: string }
+//   interactive_button (outbound, simple)   -> { buttonText: string, buttonPayload?: string }
+//   interactive_button (outbound, extended) -> { bodyText: string, buttons: Array<{ id, title }> }
+//   interactive_button (inbound reply)      -> { replyType: 'button_reply', id, title,
+//                                                 buttonText, buttonPayload } (legacy aliases kept)
+//   interactive_list (outbound)  -> { headerText?, bodyText, footerText?, buttonLabel,
+//                                      sections: Array<{ title?, rows: Array<{ id, title, description? }> }> }
+//   interactive_list (inbound reply) -> { replyType: 'list_reply', id, title, description? }
+//   template               -> { templateName: string, language: string, components?: unknown[] }
+model Message {
+  id             String            @id @default(uuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  conversationId String
+  conversation   Conversation      @relation(fields: [conversationId], references: [id])
+  direction      MessageDirection
+  senderType     MessageSenderType
+  senderUserId   String?
+  senderUser     User?             @relation(fields: [senderUserId], references: [id])
+  waMessageId    String?           @unique
+  messageType    MessageType
+  content        Json
+  status         MessageStatus     @default(queued)
+  errorDetail    Json?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([tenantId, conversationId, createdAt])
+  @@map("messages")
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast/campaign models (M4). A template holds reusable text with
+// {{name}}-style placeholders; a campaign sends one template to a chosen set
+// of existing Contacts (recipients), batched via the queue to avoid sending
+// hundreds of messages in a single tick. Each recipient send also lands as a
+// normal outbound Message (senderType: system) so it appears in that
+// contact's regular conversation thread, not just in campaign-only UI.
+// ---------------------------------------------------------------------------
+
+model BroadcastTemplate {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String
+  body      String
+  // When set, this template sends via Meta's approved WhatsApp Message
+  // Templates API (required outside the 24h session window / for
+  // first-contact bulk sends) instead of a free-text session message.
+  // metaTemplateName is the exact internal name from WhatsApp Manager
+  // (not the display title); metaVariableCount is how many positional
+  // {{1}}, {{2}}... placeholders the approved template body has, so
+  // campaign creation knows how many values to require per recipient.
+  metaTemplateName     String?
+  metaTemplateLanguage String?
+  metaVariableCount    Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaigns BroadcastCampaign[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("broadcast_templates")
+}
+
+enum BroadcastCampaignStatus {
+  draft
+  sending
+  completed
+  failed
+}
+
+model BroadcastCampaign {
+  id              String                   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant                   @relation(fields: [tenantId], references: [id])
+  templateId      String
+  template        BroadcastTemplate        @relation(fields: [templateId], references: [id])
+  name            String
+  status          BroadcastCampaignStatus  @default(draft)
+  createdByUserId String
+  createdByUser   User                     @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  recipients BroadcastRecipient[]
+
+  @@index([tenantId, status])
+  @@map("broadcast_campaigns")
+}
+
+enum BroadcastRecipientStatus {
+  pending
+  sent
+  failed
+}
+
+model BroadcastRecipient {
+  id         String                    @id @default(uuid())
+  campaignId String
+  campaign   BroadcastCampaign         @relation(fields: [campaignId], references: [id])
+  contactId  String
+  contact    Contact                   @relation(fields: [contactId], references: [id])
+  status     BroadcastRecipientStatus  @default(pending)
+  messageId  String?
+  errorDetail Json?
+  // templateVariables shape: string[] positioned to fill {{1}}, {{2}}...
+  // in order, only used when the campaign's template has metaTemplateName
+  // set. Empty/null for internal free-text {{name}}-style templates.
+  templateVariables Json?
+  sentAt     DateTime?
+  createdAt  DateTime                  @default(now())
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId, status])
+  @@map("broadcast_recipients")
+}
+
+// ---------------------------------------------------------------------------
+// Commerce bot (Phase 1): tenant-scoped guided WhatsApp buying flow for
+// machinery sellers. Catalog + flow copy live in the DB (not hardcoded) so a
+// future admin panel can edit them without a deploy. BotSession tracks where
+// a single conversation is mid-flow across separate inbound webhook events.
+// ---------------------------------------------------------------------------
+
+enum BotStep {
+  START
+  MAIN_MENU
+  BROWSE_CATEGORY
+  BROWSE_MACHINE_LIST
+  MACHINE_DETAIL
+  AWAITING_QUANTITY
+  CONFIG_SELECTION
+  AWAITING_ADDRESS_CHOICE
+  COLLECTING_ADDRESS_NAME
+  COLLECTING_ADDRESS_COMPANY
+  COLLECTING_ADDRESS_MOBILE
+  COLLECTING_ADDRESS_EMAIL
+  COLLECTING_ADDRESS_GST
+  COLLECTING_ADDRESS_LINE
+  COLLECTING_ADDRESS_CITY
+  COLLECTING_ADDRESS_STATE
+  COLLECTING_ADDRESS_PIN
+  ORDER_SUMMARY
+  COMPLETED
+  HANDED_OFF
+}
+
+model BotSession {
+  id                String       @id @default(uuid())
+  tenantId          String
+  tenant            Tenant       @relation(fields: [tenantId], references: [id])
+  conversationId    String       @unique
+  conversation      Conversation @relation(fields: [conversationId], references: [id])
+  contactId         String
+  contact           Contact      @relation(fields: [contactId], references: [id])
+  currentStep       BotStep      @default(START)
+  // contextData shape grows additively per step; see
+  // commerce-bot-context.types.ts for the documented TS interface. Never
+  // trust it blindly — always parse defensively since it's unstructured
+  // JSON mutated incrementally as the conversation progresses.
+  contextData       Json         @default("{}")
+  draftOrderId      String?      @unique
+  draftOrder        Order?       @relation(fields: [draftOrderId], references: [id])
+  lastInteractionAt DateTime     @default(now())
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, currentStep])
+  @@map("bot_sessions")
+}
+
+model MachineCategory {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  machines Machine[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive, sortOrder])
+  @@map("machine_categories")
+}
+
+enum MachineAvailability {
+  in_stock
+  made_to_order
+  out_of_stock
+}
+
+model Machine {
+  id           String              @id @default(uuid())
+  tenantId     String
+  tenant       Tenant              @relation(fields: [tenantId], references: [id])
+  categoryId   String
+  category     MachineCategory     @relation(fields: [categoryId], references: [id])
+  name         String
+  model        String
+  basePrice    Decimal             @db.Decimal(12, 2)
+  availability MachineAvailability @default(in_stock)
+  // specs shape: { power?: string, capacity?: string, warranty?: string,
+  // installation?: string, delivery?: string } — free-form bullet strings
+  // shown verbatim in the WhatsApp detail message.
+  specs        Json                @default("{}")
+  imageMediaId String?
+  sortOrder    Int                 @default(0)
+  isActive     Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  configGroups MachineConfigGroup[]
+  orders       Order[]
+
+  @@index([tenantId, categoryId, isActive, sortOrder])
+  @@map("machines")
+}
+
+model MachineConfigGroup {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  machineId  String
+  machine    Machine  @relation(fields: [machineId], references: [id])
+  name       String
+  isRequired Boolean  @default(true)
+  sortOrder  Int      @default(0)
+
+  options MachineConfigOption[]
+
+  @@index([tenantId, machineId, sortOrder])
+  @@map("machine_config_groups")
+}
+
+model MachineConfigOption {
+  id         String              @id @default(uuid())
+  tenantId   String
+  tenant     Tenant              @relation(fields: [tenantId], references: [id])
+  groupId    String
+  group      MachineConfigGroup  @relation(fields: [groupId], references: [id])
+  label      String
+  priceDelta Decimal             @default(0) @db.Decimal(12, 2)
+  isDefault  Boolean             @default(false)
+  sortOrder  Int                 @default(0)
+
+  @@index([tenantId, groupId, sortOrder])
+  @@map("machine_config_options")
+}
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+model Order {
+  id             String       @id @default(uuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id])
+  contactId      String
+  contact        Contact      @relation(fields: [contactId], references: [id])
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  machineId      String
+  machine        Machine      @relation(fields: [machineId], references: [id])
+  quantity       Int          @default(1)
+  // selectedConfig shape: Array<{ groupId, groupName, optionId, optionLabel,
+  // priceDelta }> — denormalized snapshot, so later catalog edits never
+  // silently change the price of an already-placed order.
+  selectedConfig Json         @default("[]")
+  unitPrice      Decimal      @db.Decimal(12, 2)
+  subtotal       Decimal      @db.Decimal(12, 2)
+  gstAmount      Decimal      @db.Decimal(12, 2)
+  totalAmount    Decimal      @db.Decimal(12, 2)
+  // deliveryAddress shape: { name, company?, mobile, email?, gstNumber?,
+  // addressLine, city, state, pin } — snapshot, independent of any saved
+  // address on Contact.metadata so historical orders never mutate.
+  deliveryAddress Json
+  status         OrderStatus  @default(DRAFT)
+  confirmedAt    DateTime?
+  cancelledAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  botSession BotSession?
+
+  @@index([tenantId, status])
+  @@index([tenantId, contactId])
+  @@map("orders")
+}

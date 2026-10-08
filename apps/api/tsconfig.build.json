@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "dist", "test", "**/*.e2e-spec.ts"],
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    /* @whatsapp-crm/shared-types' package.json "main"/"types" point at its
+       compiled dist/ (built via `pnpm --filter @whatsapp-crm/shared-types
+       build`, which turbo's `^build` dependency ensures runs first) so this
+       path alias just makes that explicit for a rootDir-constrained build.
+       The non-build tsconfig.json aliases straight to src instead, for
+       fast typecheck/IDE feedback without needing a build step first. */
+    "paths": {
+      "@whatsapp-crm/shared-types": ["../../packages/shared-types/dist"]
+    },
+    /* Disable incremental compilation for the build specifically: tsc's
+       .tsbuildinfo cache tracks source mtimes, not whether dist/ still
+       exists, so `rm -rf dist && nest build` can silently no-op if a stale
+       .tsbuildinfo says "nothing changed". Correctness > marginal speed
+       here since this is not a hot dev-loop command (see start:dev for
+       that). */
+    "incremental": false
+  }
+}

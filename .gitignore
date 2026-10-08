@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# Environment files (never commit secrets/local config)
+.env
+.env.local
+!.env.example
+
+# Compiled output accidentally left in package source dirs
+packages/**/src/**/*.js
+packages/**/src/**/*.js.map
+packages/**/src/**/*.d.ts
+packages/**/src/**/*.d.ts.map
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
