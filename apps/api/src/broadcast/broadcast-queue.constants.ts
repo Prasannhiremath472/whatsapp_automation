@@ -1,14 +1,5 @@
-export const BROADCAST_SEND_QUEUE = 'broadcast-send';
-
-export const DISPATCH_CAMPAIGN_JOB = 'dispatch-campaign';
-
-/** One dispatcher job per campaign; the id de-duplicates concurrent enqueues. */
-export const dispatchJobId = (campaignId: string): string => `dispatch-${campaignId}`;
-
-export interface DispatchCampaignJob {
-  campaignId: string;
-  tenantId: string;
-}
+/** How many campaigns (of different businesses) this server sends at the same time. */
+export const DISPATCHER_CONCURRENCY = 4;
 
 /** How long a dispatcher owns a campaign before another worker may take over. */
 export const DISPATCHER_LEASE_MS = 60_000;

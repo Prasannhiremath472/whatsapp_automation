@@ -1,6 +1,6 @@
-# Local development services. The API uses MySQL (the target hosting only
-# supports MySQL) and Redis (BullMQ queues). Ports are offset from the
-# defaults so these never collide with a MySQL/Redis already on your machine.
+# Local development services. The API needs only MySQL (the target hosting
+# only supports MySQL; queues run inside the API process). The port is offset
+# from the default so it never collides with a MySQL already on your machine.
 services:
   mysql:
     image: mysql:8.0
@@ -20,18 +20,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
-  redis:
-    image: redis:7
-    container_name: whatsapp_crm_redis
-    restart: unless-stopped
-    ports:
-      - "6380:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
 volumes:
   whatsapp_crm_mysql_data:

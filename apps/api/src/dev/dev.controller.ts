@@ -1,8 +1,6 @@
 import { BadRequestException, Body, Controller, ForbiddenException, HttpCode, Post } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { Public } from '../common/decorators/public.decorator';
-import { WEBHOOK_EVENTS_QUEUE } from '../webhook/webhook-queue.constants';
+import { WebhookEventsService } from '../webhook/webhook-events.service';
 import type { WebhookPayload } from '../webhook/webhook-payload.types';
 
 interface SimulateInboundMessageBody {
@@ -28,14 +26,14 @@ interface SimulateStatusUpdateBody {
 
 /**
  * Dev-only simulation endpoints that let the full webhook pipeline
- * (queue -> processor -> router -> inbox) be exercised locally without real
+ * (stored event -> worker -> router -> inbox) be exercised locally without real
  * Meta credentials. Hard-disabled outside development at the module level
  * (see DevModule) — NOT just left unregistered by convention, but guarded
  * so an accidental import can't expose it.
  */
 @Controller('dev')
 export class DevController {
-  constructor(@InjectQueue(WEBHOOK_EVENTS_QUEUE) private readonly queue: Queue) {}
+  constructor(private readonly events: WebhookEventsService) {}
 
   private assertNotProduction(): void {
     if (process.env.NODE_ENV === 'production') {
@@ -106,10 +104,10 @@ export class DevController {
       ],
     };
 
-    // Enqueue onto the SAME queue the real POST /webhook uses, so this is a
-    // true end-to-end exercise of the pipeline rather than a shortcut that
-    // calls processing logic directly.
-    await this.queue.add('inbound-webhook-event', payload, { removeOnComplete: true, removeOnFail: 100 });
+    // Store it the SAME way the real POST /webhook does, so this is a true
+    // end-to-end exercise of the pipeline rather than a shortcut that calls
+    // processing logic directly.
+    await this.events.enqueue(payload);
 
     return { queued: true };
   }
@@ -150,7 +148,7 @@ export class DevController {
       ],
     };
 
-    await this.queue.add('inbound-webhook-event', payload, { removeOnComplete: true, removeOnFail: 100 });
+    await this.events.enqueue(payload);
 
     return { queued: true };
   }

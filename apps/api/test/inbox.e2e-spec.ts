@@ -1,36 +1,33 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getQueueToken } from '@nestjs/bullmq';
-import type { Queue } from 'bullmq';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { WEBHOOK_EVENTS_QUEUE } from '../src/webhook/webhook-queue.constants';
 
 /**
  * Milestone 3: multi-agent shared live inbox — REST + tenant-isolation
  * coverage for send/assign/status. Follows the same conventions as
- * webhook.e2e-spec.ts (real Postgres + Redis, polls the BullMQ queue to
- * idle after simulate-inbound-message rather than asserting immediately).
+ * webhook.e2e-spec.ts (real MySQL, waits for the stored webhook events to be
+ * processed after simulate-inbound-message rather than asserting immediately).
  * Socket.IO itself is not covered here (harder to test meaningfully under
  * Jest/Supertest) — REST + tenant isolation is the focus.
  */
 describe('Inbox — send/assign/status (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  let queue: Queue;
 
   async function waitForQueueIdle(): Promise<void> {
+    // Processed events are deleted, so "idle" means no pending/processing event is left.
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
-      const counts = await queue.getJobCounts('waiting', 'active', 'delayed');
-      if ((counts.waiting ?? 0) === 0 && (counts.active ?? 0) === 0 && (counts.delayed ?? 0) === 0) {
+      const open = await prisma.webhookEvent.count({ where: { status: { in: ['pending', 'processing'] } } });
+      if (open === 0) {
         await new Promise((resolve) => setTimeout(resolve, 300));
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    throw new Error('Timed out waiting for webhook-events queue to drain');
+    throw new Error('Timed out waiting for webhook events to be processed');
   }
 
   beforeAll(async () => {
@@ -43,7 +40,6 @@ describe('Inbox — send/assign/status (e2e)', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
-    queue = app.get<Queue>(getQueueToken(WEBHOOK_EVENTS_QUEUE));
 
     await prisma.message.deleteMany();
     await prisma.conversation.deleteMany();
@@ -52,7 +48,7 @@ describe('Inbox — send/assign/status (e2e)', () => {
     await prisma.refreshToken.deleteMany();
     await prisma.user.deleteMany();
     await prisma.tenant.deleteMany();
-    await queue.obliterate({ force: true });
+    await prisma.webhookEvent.deleteMany();
   });
 
   afterAll(async () => {
@@ -63,8 +59,7 @@ describe('Inbox — send/assign/status (e2e)', () => {
     await prisma.refreshToken.deleteMany();
     await prisma.user.deleteMany();
     await prisma.tenant.deleteMany();
-    await queue.obliterate({ force: true });
-    await queue.close();
+    await prisma.webhookEvent.deleteMany();
     await app.close();
   });
 

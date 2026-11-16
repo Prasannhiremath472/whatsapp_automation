@@ -1,7 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
-import type { Job } from 'bullmq';
-import { WEBHOOK_EVENTS_QUEUE } from './webhook-queue.constants';
+import { Injectable, Logger } from '@nestjs/common';
 import type { WebhookPayload } from './webhook-payload.types';
 import { RouterService } from '../router/router.service';
 import { InboxService } from '../inbox/inbox.service';
@@ -10,14 +7,15 @@ import { ContactsService } from '../contacts/contacts.service';
 import { TemplatesService } from '../templates/templates.service';
 
 /**
- * Consumes queued raw webhook payloads. For each entry[].changes[], resolves
- * the owning tenant via phoneNumberId, then dispatches to InboxService for
- * message ingestion or status updates. Used both by the real POST /webhook
- * path and by the dev simulate-inbound-message endpoint (which enqueues
- * onto the same queue so it exercises the identical code path).
+ * Handles one stored raw webhook payload (called by WebhookWorker). For each
+ * entry[].changes[], resolves the owning tenant via phoneNumberId, then
+ * dispatches to InboxService for message ingestion or status updates. Used
+ * both by the real POST /webhook path and by the dev simulate-inbound-message
+ * endpoint (which stores events the same way so it exercises the identical
+ * code path).
  */
-@Processor(WEBHOOK_EVENTS_QUEUE)
-export class WebhookProcessor extends WorkerHost {
+@Injectable()
+export class WebhookProcessor {
   private readonly logger = new Logger(WebhookProcessor.name);
 
   constructor(
@@ -26,13 +24,9 @@ export class WebhookProcessor extends WorkerHost {
     private readonly tracker: CampaignTracker,
     private readonly contacts: ContactsService,
     private readonly templates: TemplatesService,
-  ) {
-    super();
-  }
+  ) {}
 
-  async process(job: Job<WebhookPayload>): Promise<void> {
-    const payload = job.data;
-
+  async process(payload: WebhookPayload): Promise<void> {
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
         const value = change.value;

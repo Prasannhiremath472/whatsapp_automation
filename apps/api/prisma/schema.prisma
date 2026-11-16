@@ -444,6 +444,34 @@ model BroadcastRecipient {
 }
 
 // ---------------------------------------------------------------------------
+// Webhook inbox: Meta webhook payloads are stored here before they are
+// processed, so nothing is lost if the server restarts mid-way. Replaces a
+// Redis queue — the API needs only MySQL. Successful events are deleted;
+// failed ones are kept for a week so they can be inspected.
+// ---------------------------------------------------------------------------
+
+enum WebhookEventStatus {
+  pending
+  processing
+  failed
+}
+
+model WebhookEvent {
+  id          String             @id @default(uuid())
+  payload     Json
+  status      WebhookEventStatus @default(pending)
+  attempts    Int                @default(0)
+  // Not processed before this time (used for delayed mock-mode receipts).
+  runAfter    DateTime           @default(now())
+  lockedUntil DateTime?
+  lastError   String?            @db.VarChar(500)
+  createdAt   DateTime           @default(now())
+
+  @@index([status, runAfter])
+  @@map("webhook_events")
+}
+
+// ---------------------------------------------------------------------------
 // Commerce bot (Phase 1): tenant-scoped guided WhatsApp buying flow for
 // machinery sellers. Catalog + flow copy live in the DB (not hardcoded) so a
 // future admin panel can edit them without a deploy. BotSession tracks where

@@ -1,7 +1,5 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Inject, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Job } from 'bullmq';
 import { Prisma, type BroadcastCampaign, type BroadcastRecipient, type Contact, type MessageTemplate, type WhatsappConnection } from '@prisma/client';
 import type { Audience, VariableMapping } from '@whatsapp-crm/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,12 +9,7 @@ import {
   type WhatsAppProvider,
 } from '../whatsapp-connections/whatsapp-provider.interface';
 import { AudienceService } from './audience.service';
-import {
-  BROADCAST_SEND_QUEUE,
-  DISPATCHER_LEASE_MS,
-  MAX_SEND_ATTEMPTS,
-  type DispatchCampaignJob,
-} from './broadcast-queue.constants';
+import { DISPATCHER_CONCURRENCY, DISPATCHER_LEASE_MS, MAX_SEND_ATTEMPTS } from './broadcast-queue.constants';
 import { MockReceiptSimulator } from './mock-receipt.simulator';
 import { buildTemplateComponents, renderBody, resolveVariables } from './variable-resolver';
 
@@ -40,10 +33,17 @@ type SendOutcome =
  * - Sends are at-most-once: a recipient is marked "sending" before the API
  *   call, and anything left "sending" by a crash is failed (not re-sent) so a
  *   customer is never messaged twice by accident. Users can retry failures.
+ * - Runs inside the API process (no separate queue / Redis). `enqueue` starts a
+ *   campaign, at most DISPATCHER_CONCURRENCY at a time and never the same one
+ *   twice. If the server restarts, the DB lease expires and CampaignScheduler
+ *   re-wakes every campaign that is still "running".
  */
-@Processor(BROADCAST_SEND_QUEUE, { concurrency: 4 })
-export class CampaignDispatcher extends WorkerHost {
+@Injectable()
+export class CampaignDispatcher implements OnModuleDestroy {
   private readonly logger = new Logger(CampaignDispatcher.name);
+  private readonly waiting: string[] = [];
+  private readonly active = new Map<string, Promise<void>>();
+  private stopped = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -51,19 +51,40 @@ export class CampaignDispatcher extends WorkerHost {
     private readonly audience: AudienceService,
     private readonly receipts: MockReceiptSimulator,
     @Inject(WHATSAPP_PROVIDER) private readonly provider: WhatsAppProvider,
-  ) {
-    super();
+  ) {}
+
+  /** Stops taking batches; each campaign finishes the batch it is on, releases its lease and can resume after a restart. */
+  async onModuleDestroy(): Promise<void> {
+    this.stopped = true;
+    this.waiting.length = 0;
+    await Promise.allSettled([...this.active.values()]);
   }
 
-  async process(job: Job<DispatchCampaignJob>): Promise<void> {
-    await this.run(job.data.campaignId);
+  /** Starts a campaign in the background. Ignored if it is already running or waiting for a free slot. */
+  enqueue(campaignId: string): void {
+    if (this.stopped || this.active.has(campaignId) || this.waiting.includes(campaignId)) return;
+    this.waiting.push(campaignId);
+    this.pump();
+  }
+
+  private pump(): void {
+    while (!this.stopped && this.active.size < DISPATCHER_CONCURRENCY && this.waiting.length > 0) {
+      const campaignId = this.waiting.shift()!;
+      const done = this.run(campaignId)
+        .catch(() => undefined) // run() has already logged the failure
+        .finally(() => {
+          this.active.delete(campaignId);
+          this.pump();
+        });
+      this.active.set(campaignId, done);
+    }
   }
 
   private get ratePerSecond(): number {
     return this.config.get<number>('BROADCAST_RATE_PER_SECOND') ?? 20;
   }
 
-  /** Public so tests can drive a campaign without the queue. */
+  /** Public so tests can drive a campaign directly. */
   async run(campaignId: string): Promise<void> {
     const leaseUntil = () => new Date(Date.now() + DISPATCHER_LEASE_MS);
 
@@ -103,6 +124,7 @@ export class CampaignDispatcher extends WorkerHost {
       const rate = this.ratePerSecond;
 
       for (;;) {
+        if (this.stopped) return; // server shutting down: lease is released below, the scheduler resumes us later
         const fresh = await this.prisma.broadcastCampaign.findUnique({ where: { id: campaignId }, select: { status: true } });
         if (fresh?.status !== 'running') return; // paused / cancelled while we were working
 
@@ -149,9 +171,12 @@ export class CampaignDispatcher extends WorkerHost {
 
   // ---------------------------------------------------------------- helpers
 
-  /** Overridable so tests do not really wait. */
-  protected sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  /** Overridable so tests do not really wait. Wakes early on shutdown so the server can exit promptly. */
+  protected async sleep(ms: number): Promise<void> {
+    const end = Date.now() + ms;
+    while (!this.stopped && Date.now() < end) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, end - Date.now())));
+    }
   }
 
   /** One campaign per tenant at a time: yield to an earlier-started campaign that is actively sending. */

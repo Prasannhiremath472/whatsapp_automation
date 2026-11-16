@@ -1,25 +1,21 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getQueueToken } from '@nestjs/bullmq';
-import type { Queue } from 'bullmq';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { WEBHOOK_EVENTS_QUEUE } from '../src/webhook/webhook-queue.constants';
 
 /**
- * Runs against a real Postgres + Redis instance (DATABASE_URL / REDIS_URL
- * from apps/api/.env — both provided by infra/docker-compose.yml). Wipes
- * webhook/M2 + M1 tables before running for a deterministic starting state.
+ * Runs against a real MySQL instance (DATABASE_URL from apps/api/.env —
+ * provided by infra/docker-compose.yml). Wipes webhook/M2 + M1 tables before
+ * running for a deterministic starting state.
  *
- * Ingestion happens asynchronously via a BullMQ worker, so tests poll the
- * queue until idle after triggering a simulate-* call rather than asserting
- * immediately.
+ * Ingestion happens asynchronously via the webhook worker (events are stored
+ * in the database first), so tests wait until no event is left to process
+ * after triggering a simulate-* call rather than asserting immediately.
  */
 describe('Webhook + Router + Inbox (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  let queue: Queue;
 
   const superAdmin = {
     email: 'super@webhook-e2e-test.local',
@@ -28,20 +24,19 @@ describe('Webhook + Router + Inbox (e2e)', () => {
   };
 
   async function waitForQueueIdle(): Promise<void> {
-    // Poll until the queue has no waiting/active/delayed jobs left. Short
-    // interval + generous timeout since this is all localhost.
+    // Processed events are deleted, so "idle" means no pending/processing
+    // event is left. Short interval + generous timeout since this is all localhost.
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
-      const counts = await queue.getJobCounts('waiting', 'active', 'delayed');
-      if ((counts.waiting ?? 0) === 0 && (counts.active ?? 0) === 0 && (counts.delayed ?? 0) === 0) {
-        // Give the worker's `completed` transition a brief moment to settle
-        // after the last job leaves active.
+      const open = await prisma.webhookEvent.count({ where: { status: { in: ['pending', 'processing'] } } });
+      if (open === 0) {
+        // Give the worker a brief moment to settle after the last event.
         await new Promise((resolve) => setTimeout(resolve, 300));
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    throw new Error('Timed out waiting for webhook-events queue to drain');
+    throw new Error('Timed out waiting for webhook events to be processed');
   }
 
   beforeAll(async () => {
@@ -54,7 +49,6 @@ describe('Webhook + Router + Inbox (e2e)', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
-    queue = app.get<Queue>(getQueueToken(WEBHOOK_EVENTS_QUEUE));
 
     // Clean slate: order matters due to FKs.
     await prisma.message.deleteMany();
@@ -64,7 +58,7 @@ describe('Webhook + Router + Inbox (e2e)', () => {
     await prisma.refreshToken.deleteMany();
     await prisma.user.deleteMany();
     await prisma.tenant.deleteMany();
-    await queue.obliterate({ force: true });
+    await prisma.webhookEvent.deleteMany();
   });
 
   afterAll(async () => {
@@ -75,8 +69,7 @@ describe('Webhook + Router + Inbox (e2e)', () => {
     await prisma.refreshToken.deleteMany();
     await prisma.user.deleteMany();
     await prisma.tenant.deleteMany();
-    await queue.obliterate({ force: true });
-    await queue.close();
+    await prisma.webhookEvent.deleteMany();
     await app.close();
   });
 

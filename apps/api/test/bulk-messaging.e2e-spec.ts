@@ -6,8 +6,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { CampaignScheduler } from '../src/broadcast/campaign-scheduler.service';
 
 /**
- * Full bulk-messaging flow against a REAL MySQL + Redis (DATABASE_URL /
- * REDIS_URL), using the mock WhatsApp provider.
+ * Full bulk-messaging flow against a REAL MySQL (DATABASE_URL), using the
+ * mock WhatsApp provider.
  *
  * !! This test WIPES EVERY TABLE before and after it runs (like the other
  * e2e suites). Point DATABASE_URL at a dedicated test database, never at

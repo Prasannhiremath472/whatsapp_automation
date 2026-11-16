@@ -7,11 +7,11 @@ bulk campaigns and automation from one dashboard. pnpm + Turborepo monorepo.
 
 | Path | What it is | Port |
 | --- | --- | --- |
-| `apps/api` | NestJS REST API (`/api/v1`), Prisma + MySQL, BullMQ + Redis | 3000 |
+| `apps/api` | NestJS REST API (`/api/v1`), Prisma + MySQL (no Redis; queues run in-process, state lives in MySQL) | 3000 |
 | `apps/web` | **Business app** — React 19 + Vite + Tailwind 4 (contacts, campaigns, templates, inbox, …) | 5173 |
 | `apps/admin` | **Super-admin panel** — React 19 + Vite + Tailwind 4 (businesses, plans, support, …) | 5174 |
 | `packages/shared-types` | Zod schemas + TypeScript types shared by the API and both apps | — |
-| `infra/` | `docker-compose.yml` (MySQL 8 + Redis), dev seed script | — |
+| `infra/` | `docker-compose.yml` (MySQL 8), dev seed script | — |
 
 ## Status
 
@@ -29,7 +29,7 @@ screen needs from the backend and the planned order.
 
 ```bash
 pnpm install
-docker compose -f infra/docker-compose.yml up -d        # MySQL on :3307, Redis on :6380
+docker compose -f infra/docker-compose.yml up -d        # MySQL on :3307
 cp apps/api/.env.example apps/api/.env                   # then set ENCRYPTION_KEY (openssl rand -hex 32)
 cp apps/web/.env.example apps/web/.env
 pnpm --filter @whatsapp-crm/shared-types build
@@ -47,5 +47,5 @@ Open http://localhost:5173 and sign in as `admin@acme-retail.dev.local` /
 ```bash
 pnpm --filter @whatsapp-crm/api test        # unit tests (no infrastructure)
 pnpm --filter @whatsapp-crm/web test        # UI tests (mocked API)
-pnpm --filter @whatsapp-crm/api test:e2e    # needs MySQL + Redis; WIPES the database in DATABASE_URL
+pnpm --filter @whatsapp-crm/api test:e2e    # needs MySQL; WIPES the database in DATABASE_URL
 ```

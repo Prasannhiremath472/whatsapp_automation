@@ -1,6 +1,4 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import type { Queue } from 'bullmq';
 import { Prisma, type BroadcastCampaign, type BroadcastCampaignStatus, type MessageTemplate } from '@prisma/client';
 import {
   extractVariableNumbers,
@@ -17,12 +15,7 @@ import {
 } from '@whatsapp-crm/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AudienceService } from './audience.service';
-import {
-  BROADCAST_SEND_QUEUE,
-  DISPATCH_CAMPAIGN_JOB,
-  dispatchJobId,
-  type DispatchCampaignJob,
-} from './broadcast-queue.constants';
+import { CampaignDispatcher } from './campaign-dispatcher.processor';
 import { isValidTimeZone, zonedTimeToUtc } from './timezone';
 
 type CampaignWithTemplate = BroadcastCampaign & { template: Pick<MessageTemplate, 'name'> };
@@ -65,7 +58,7 @@ export class CampaignsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audience: AudienceService,
-    @InjectQueue(BROADCAST_SEND_QUEUE) private readonly queue: Queue<DispatchCampaignJob>,
+    private readonly dispatcher: CampaignDispatcher,
   ) {}
 
   // ----------------------------------------------------------------- reads
@@ -336,12 +329,9 @@ export class CampaignsService {
     await this.claimAndEnqueue(campaign.id, campaign.tenantId);
   }
 
-  async enqueueDispatch(campaignId: string, tenantId: string): Promise<void> {
-    await this.queue.add(
-      DISPATCH_CAMPAIGN_JOB,
-      { campaignId, tenantId },
-      { jobId: dispatchJobId(campaignId), removeOnComplete: true, removeOnFail: true },
-    );
+  /** Wakes a dispatcher for a running campaign (ignored if one is already on it). */
+  async enqueueDispatch(campaignId: string, _tenantId: string): Promise<void> {
+    this.dispatcher.enqueue(campaignId);
   }
 
   async pause(tenantId: string, id: string): Promise<CampaignDto> {

@@ -75,7 +75,7 @@ SELECT
     COALESCE(`metaTemplateLanguage`, 'en'),
     'none',
     `body`,
-    CAST('[]' AS JSON),
+    '[]',
     CASE WHEN `metaTemplateName` IS NOT NULL THEN 'approved' ELSE 'draft' END,
     `createdAt`,
     `updatedAt`
@@ -110,8 +110,8 @@ ALTER TABLE `broadcast_campaigns`
 -- Back-fill: legacy campaigns targeted explicit contacts, which are now the
 -- recipient rows themselves.
 UPDATE `broadcast_campaigns`
-SET `audience` = CAST('{"mode":"contacts","tags":[],"contactIds":[]}' AS JSON),
-    `variableMapping` = CAST('{}' AS JSON);
+SET `audience` = '{"mode":"contacts","tags":[],"contactIds":[]}',
+    `variableMapping` = '{}';
 ALTER TABLE `broadcast_campaigns`
     MODIFY `audience` JSON NOT NULL,
     MODIFY `variableMapping` JSON NOT NULL;

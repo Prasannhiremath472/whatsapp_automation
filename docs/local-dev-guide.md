@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Node.js 20+ (tested on 22), pnpm 11 (pinned in the root `package.json`)
-- MySQL 8 and Redis — easiest via Docker Desktop (below), or your own installs
+- MySQL 8 — easiest via Docker Desktop (below), or your own install. No Redis needed.
 
 ## 1. Install
 
@@ -12,17 +12,20 @@ pnpm install
 pnpm --filter @whatsapp-crm/shared-types build
 ```
 
-## 2. Start MySQL + Redis
+## 2. Start MySQL
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d
 ```
 
 - MySQL 8 → `localhost:3307`, db `whatsapp_crm_dev`, user/password `genie`/`genie`
-- Redis → `localhost:6380` (BullMQ queues: webhook events + campaign sending)
 
-Using a MySQL/Redis you already run instead? Point `DATABASE_URL` / `REDIS_URL`
-in `apps/api/.env` at them.
+Using a MySQL you already run instead? Point `DATABASE_URL` in `apps/api/.env` at it.
+
+The API keeps no state outside MySQL: webhook events are stored in the
+`webhook_events` table before they are processed, and campaigns are sent by a
+worker inside the API process (their state lives in the campaign tables). That is
+what lets it run on plain Node + MySQL hosting.
 
 ## 3. Configure
 
@@ -35,7 +38,7 @@ In `apps/api/.env` set at least:
 
 | Variable | Notes |
 | --- | --- |
-| `DATABASE_URL`, `REDIS_URL` | match step 2 |
+| `DATABASE_URL` | matches step 2 |
 | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | long random values outside local dev |
 | `ENCRYPTION_KEY` | **required to connect a WhatsApp account.** `openssl rand -hex 32`. Never commit it. |
 | `WHATSAPP_MODE` | `mock` (default; no Meta account needed) or `live` |
@@ -82,7 +85,7 @@ pnpm dev        # api :3000, business app :5173, admin panel :5174
    the approved template, how `{{1}}` is filled (e.g. first name, fallback "there"),
    send now or schedule → *Launch*.
 4. Watch the campaign: sent → delivered → read counters update live. In mock mode
-   delivered/read receipts are simulated through the real webhook queue
+   delivered/read receipts are simulated through the real webhook pipeline
    (`MOCK_AUTO_ACK=true`). A number ending in `0000` always fails ("not on WhatsApp")
    so you can see the failure + *Retry failed* flow.
 5. Simulate a customer replying **STOP**:
@@ -106,7 +109,7 @@ Meta's documented API but has **not been exercised against real credentials yet*
 ```bash
 pnpm --filter @whatsapp-crm/api test        # unit tests, no infrastructure
 pnpm --filter @whatsapp-crm/web test        # UI tests with a mocked API
-pnpm --filter @whatsapp-crm/api test:e2e    # real MySQL + Redis
+pnpm --filter @whatsapp-crm/api test:e2e    # real MySQL
 ```
 
 The e2e suites **delete every row in every table** of the database in
@@ -114,12 +117,11 @@ The e2e suites **delete every row in every table** of the database in
 
 ```bash
 DATABASE_URL="mysql://genie:genie@localhost:3307/whatsapp_crm_test" \
-REDIS_URL="redis://localhost:6380" \
 pnpm --filter @whatsapp-crm/api exec prisma migrate deploy && \
 pnpm --filter @whatsapp-crm/api test:e2e
 ```
 
-(`http-wiring.e2e-spec.ts` needs no database or Redis.)
+(`http-wiring.e2e-spec.ts` needs no database.)
 
 On Windows, run `vitest` from a path with an **uppercase drive letter**
 (`D:\…`, not `d:\…`) — vitest loads two copies of itself otherwise and every
@@ -128,7 +130,7 @@ suite fails with "Cannot read properties of undefined (reading 'config')".
 ## Troubleshooting
 
 - **`ENCRYPTION_KEY` error when connecting WhatsApp** — set it in `apps/api/.env` (64 hex chars) and restart.
-- **Campaign stays "Running" with nothing sent** — a campaign only runs while a worker has Redis; check `REDIS_URL`.
-  Only one campaign per business sends at a time; others wait their turn.
+- **Campaign stays "Running" with nothing sent** — only one campaign per business sends at a time; others wait their turn.
+  After a server restart the scheduler picks a running campaign back up within about a minute.
 - **Campaign paused by itself** — the reason is shown on the campaign (token rejected by Meta, account disconnected, or template no longer approved). Fix it and press *Resume*.
 - **CORS error in the browser** — add the app's origin to `CORS_ORIGINS`.

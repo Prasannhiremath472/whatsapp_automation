@@ -1,5 +1,4 @@
 import { INestApplication } from '@nestjs/common';
-import { getQueueToken } from '@nestjs/bullmq';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -9,13 +8,12 @@ import { DatabaseService } from '../src/database/database.service';
 import { CampaignDispatcher } from '../src/broadcast/campaign-dispatcher.processor';
 import { CampaignScheduler } from '../src/broadcast/campaign-scheduler.service';
 import { WebhookProcessor } from '../src/webhook/webhook.processor';
-import { BROADCAST_SEND_QUEUE } from '../src/broadcast/broadcast-queue.constants';
-import { WEBHOOK_EVENTS_QUEUE } from '../src/webhook/webhook-queue.constants';
+import { WebhookWorker } from '../src/webhook/webhook.worker';
 
 /**
  * HTTP-level wiring, routing, authorisation and validation checks that need
- * NO database or Redis: Prisma, the raw MySQL pool, the BullMQ queues and the
- * workers are all replaced with inert stubs, so this verifies the Nest
+ * NO database: Prisma, the raw MySQL pool and the background workers are all
+ * replaced with inert stubs, so this verifies the Nest
  * dependency graph and every guard/pipe in front of the services. Anything
  * that would reach the database fails loudly (the Prisma stub throws).
  */
@@ -44,19 +42,16 @@ describe('HTTP wiring: routing, auth, RBAC, validation (no infrastructure)', () 
 
     // Imported lazily: ConfigModule validates process.env at import time.
     const { AppModule } = await import('../src/app.module');
-    const fakeQueue = { add: jest.fn(), addBulk: jest.fn(), close: jest.fn(), getJobCounts: jest.fn() };
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService)
       .useValue(prismaStub)
       .overrideProvider(DatabaseService)
       .useValue({})
-      .overrideProvider(getQueueToken(BROADCAST_SEND_QUEUE))
-      .useValue(fakeQueue)
-      .overrideProvider(getQueueToken(WEBHOOK_EVENTS_QUEUE))
-      .useValue(fakeQueue)
       .overrideProvider(CampaignDispatcher)
       .useValue({})
       .overrideProvider(WebhookProcessor)
+      .useValue({})
+      .overrideProvider(WebhookWorker)
       .useValue({})
       .overrideProvider(CampaignScheduler)
       .useValue({})

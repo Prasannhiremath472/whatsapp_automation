@@ -19,3 +19,6 @@ packages/**/src/**/*.d.ts.map
 Thumbs.db
 .vscode/
 .idea/
+
+# Production secrets backup (never commit)
+deploy-secrets/

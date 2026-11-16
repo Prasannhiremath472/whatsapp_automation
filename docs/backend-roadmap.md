@@ -76,5 +76,5 @@ not exist server-side yet; `UserRole` has `super_admin`, `tenant_admin`, `agent`
 
 - **Login hardening:** login currently looks users up by email alone, but emails are only unique *per business*; the same email in two businesses is ambiguous. Add business selection or globally-unique emails, plus rate limiting / lockout.
 - **Plan quotas:** meter campaign messages against the plan (Phase 5 dependency).
-- **Observability:** structured logs, queue dashboards, alerting on paused campaigns.
-- **Deployment:** Hostinger Node + MySQL; campaign sending and webhooks need Redis (BullMQ). Confirm Redis is available on the chosen Hostinger plan; if not, use a managed Redis.
+- **Observability:** structured logs, an admin view of failed webhook events (`webhook_events` rows with `status = 'failed'`), alerting on paused campaigns.
+- **Deployment:** Hostinger Node + MySQL only — no Redis. Webhook events are stored in MySQL and campaigns are sent by an in-process worker, both safe to restart. Run a single API instance on shared hosting; if it is ever scaled out, the DB leases and conditional claims already keep instances from sending a message twice.

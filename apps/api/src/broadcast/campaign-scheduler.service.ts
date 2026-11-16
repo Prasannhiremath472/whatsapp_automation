@@ -4,7 +4,7 @@ import { SCHEDULER_INTERVAL_MS } from './broadcast-queue.constants';
 import { CampaignsService } from './campaigns.service';
 
 /**
- * Database-driven scheduler (no Redis state to lose on a restart). Every few
+ * Database-driven scheduler (nothing is kept only in memory). Every few
  * seconds it:
  *  1. starts scheduled campaigns whose time has arrived, and
  *  2. re-wakes "running" campaigns that no dispatcher currently owns (after a

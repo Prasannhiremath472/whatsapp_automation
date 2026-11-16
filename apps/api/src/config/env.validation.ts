@@ -6,8 +6,9 @@ import { z } from "zod";
  * DATABASE_URL / JWT_ACCESS_SECRET / JWT_REFRESH_SECRET / PORT are required
  * and actively used since M1.
  *
- * As of M2, REDIS_URL is actively used (BullMQ webhook-events queue) and
- * defaults to localhost:6379 if unset. WHATSAPP_MODE selects mock vs
+ * The API needs only MySQL: webhook events and campaign sending are handled
+ * inside the process (events are stored in the database), so there is no
+ * Redis. WHATSAPP_MODE selects mock vs
  * cloud-api provider (defaults to "mock"). META_WEBHOOK_VERIFY_TOKEN is used
  * by the GET /webhook handshake. META_APP_ID/META_APP_SECRET/
  * META_GRAPH_API_VERSION are only required when WHATSAPP_MODE=live.
@@ -27,7 +28,6 @@ const baseEnvSchema = z.object({
   META_APP_SECRET: z.string().optional(),
   META_GRAPH_API_VERSION: z.string().default("v21.0"),
   META_WEBHOOK_VERIFY_TOKEN: z.string().default("dev-webhook-verify-token"),
-  REDIS_URL: z.string().default("redis://localhost:6379"),
 
   // Bulk messaging.
   // 32 random bytes as 64 hex chars (openssl rand -hex 32). Required before a

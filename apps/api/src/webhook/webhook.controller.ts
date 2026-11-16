@@ -14,12 +14,10 @@ import {
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import type { Request, Response } from 'express';
 import { Inject } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
-import { WEBHOOK_EVENTS_QUEUE } from './webhook-queue.constants';
+import { WebhookEventsService } from './webhook-events.service';
 import type { WebhookPayload } from './webhook-payload.types';
 import { verifyMetaSignature } from './webhook-signature';
 import { WHATSAPP_PROVIDER, type WhatsAppProvider } from '../whatsapp-connections/whatsapp-provider.interface';
@@ -45,7 +43,7 @@ export class WebhookController {
 
   constructor(
     private readonly config: ConfigService,
-    @InjectQueue(WEBHOOK_EVENTS_QUEUE) private readonly queue: Queue,
+    private readonly events: WebhookEventsService,
     @Inject(WHATSAPP_PROVIDER) private readonly provider: WhatsAppProvider,
   ) {}
 
@@ -91,10 +89,9 @@ export class WebhookController {
       throw new BadRequestException('Unexpected webhook payload shape');
     }
 
-    await this.queue.add('inbound-webhook-event', payload, {
-      removeOnComplete: true,
-      removeOnFail: 100,
-    });
+    // Persist first, process right after: Meta gets its 200 only once the
+    // payload is safely stored, so a crash can no longer lose an event.
+    await this.events.enqueue(payload);
 
     return { received: true };
   }

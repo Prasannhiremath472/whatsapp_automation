@@ -1,22 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
-import type { Queue } from 'bullmq';
 import type { WhatsappConnection } from '@prisma/client';
-import { WEBHOOK_EVENTS_QUEUE } from '../webhook/webhook-queue.constants';
+import { WebhookEventsService } from '../webhook/webhook-events.service';
 
 /**
  * In mock mode Meta never calls our webhook, so campaign stats would stay at
- * "sent" forever. This enqueues the same status webhooks Meta would send
- * (delivered, then read for most recipients) onto the real webhook queue, so
- * the genuine delivery-tracking code path runs. Does nothing in live mode or
- * when MOCK_AUTO_ACK=false.
+ * "sent" forever. This stores the same status webhooks Meta would send
+ * (delivered, then read for most recipients) in the webhook inbox, due a few
+ * seconds from now, so the genuine delivery-tracking code path runs. Does
+ * nothing in live mode or when MOCK_AUTO_ACK=false.
  */
 @Injectable()
 export class MockReceiptSimulator {
   constructor(
     private readonly config: ConfigService,
-    @InjectQueue(WEBHOOK_EVENTS_QUEUE) private readonly webhookQueue: Queue,
+    private readonly events: WebhookEventsService,
   ) {}
 
   private get enabled(): boolean {
@@ -26,9 +24,8 @@ export class MockReceiptSimulator {
   simulate(connection: WhatsappConnection, waMessageId: string, toWaId: string): void {
     if (!this.enabled) return;
     const send = (status: 'delivered' | 'read', delayMs: number) =>
-      this.webhookQueue
-        .add(
-          'mock-receipt',
+      this.events
+        .enqueue(
           {
             object: 'whatsapp_business_account',
             entry: [
@@ -47,7 +44,7 @@ export class MockReceiptSimulator {
               },
             ],
           },
-          { delay: delayMs, removeOnComplete: true, removeOnFail: 50 },
+          { delayMs },
         )
         .catch(() => undefined); // simulation is best-effort
 

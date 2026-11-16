@@ -24,15 +24,6 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
 
     env:
       # The e2e suites wipe every table: this is a throwaway CI database.
@@ -40,7 +31,6 @@ jobs:
       JWT_ACCESS_SECRET: ci-access-secret
       JWT_REFRESH_SECRET: ci-refresh-secret
       PORT: 3000
-      REDIS_URL: redis://localhost:6379
       VITE_API_BASE_URL: http://localhost:3000/api/v1
 
     steps:

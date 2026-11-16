@@ -147,6 +147,18 @@ export class FakeTable {
     return { count: hit.length };
   }
 
+  async delete(args: Row): Promise<Row> {
+    const at = this.rows.findIndex((r) => matches(r, args.where));
+    if (at < 0) throw new Error(`fake prisma: ${this.name}.delete found no row for ${JSON.stringify(args.where)}`);
+    return this.rows.splice(at, 1)[0]!;
+  }
+
+  async deleteMany(args: Row = {}): Promise<{ count: number }> {
+    const before = this.rows.length;
+    this.rows = this.rows.filter((r) => !matches(r, args.where));
+    return { count: before - this.rows.length };
+  }
+
   async count(args: Row = {}): Promise<number> {
     return this.rows.filter((r) => matches(r, args.where)).length;
   }
@@ -187,4 +199,5 @@ export class FakePrisma {
   contact = new FakeTable('contact', this, () => ({ optedOut: false, displayName: null, profileName: null, email: null, location: null }));
   conversation = new FakeTable('conv', this);
   message = new FakeTable('msg', this);
+  webhookEvent = new FakeTable('evt', this, () => ({ status: 'pending', attempts: 0, runAfter: new Date(), lockedUntil: null, lastError: null, payload: {} }));
 }
