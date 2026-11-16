@@ -25,29 +25,31 @@ enum UserRole {
 }
 
 model Tenant {
-  id                  String       @id @default(uuid())
-  name                String
-  slug                String       @unique
-  business_category   String?
-  status              TenantStatus @default(pending_onboarding)
-  commerceBotEnabled  Boolean      @default(false)
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  id                 String       @id @default(uuid())
+  name               String
+  slug               String       @unique
+  business_category  String?
+  status             TenantStatus @default(pending_onboarding)
+  commerceBotEnabled Boolean      @default(false)
+  timezone           String       @default("Asia/Kolkata")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   users User[]
 
-  whatsappConnection    WhatsappConnection?
-  contacts              Contact[]
-  conversations         Conversation[]
-  messages              Message[]
-  broadcastTemplates    BroadcastTemplate[]
-  broadcastCampaigns    BroadcastCampaign[]
-  botSessions           BotSession[]
-  machineCategories     MachineCategory[]
-  machines              Machine[]
-  machineConfigGroups   MachineConfigGroup[]
-  machineConfigOptions  MachineConfigOption[]
-  orders                Order[]
+  whatsappConnection   WhatsappConnection?
+  contacts             Contact[]
+  conversations        Conversation[]
+  messages             Message[]
+  messageTemplates     MessageTemplate[]
+  tags                 Tag[]
+  broadcastCampaigns   BroadcastCampaign[]
+  botSessions          BotSession[]
+  machineCategories    MachineCategory[]
+  machines             Machine[]
+  machineConfigGroups  MachineConfigGroup[]
+  machineConfigOptions MachineConfigOption[]
+  orders               Order[]
 
   @@map("tenants")
 }
@@ -70,6 +72,7 @@ model User {
   assignedConversations Conversation[]
   sentMessages          Message[]
   createdCampaigns      BroadcastCampaign[]
+  assignedContacts      Contact[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -104,20 +107,23 @@ enum WhatsappConnectionStatus {
 }
 
 model WhatsappConnection {
-  id                   String                    @id @default(uuid())
-  tenantId             String                    @unique
-  tenant               Tenant                    @relation(fields: [tenantId], references: [id])
+  id                   String                   @id @default(uuid())
+  tenantId             String                   @unique
+  tenant               Tenant                   @relation(fields: [tenantId], references: [id])
   wabaId               String?
-  phoneNumberId        String                    @unique
+  phoneNumberId        String                   @unique
   displayPhoneNumber   String?
-  accessTokenEncrypted String?                   @db.Text
+  accessTokenEncrypted String?                  @db.Text
   tokenExpiresAt       DateTime?
-  connectionStatus     WhatsappConnectionStatus  @default(pending)
-  isMock               Boolean                   @default(true)
+  connectionStatus     WhatsappConnectionStatus @default(pending)
+  // Optional per-24h cap on business-initiated (campaign) messages, mirroring
+  // the Meta messaging-limit tier. null = no app-side cap.
+  dailyMessageLimit    Int?
+  isMock               Boolean                  @default(true)
   webhookVerifyToken   String?
   connectedAt          DateTime?
-  createdAt            DateTime                  @default(now())
-  updatedAt            DateTime                  @updatedAt
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
 
   conversations Conversation[]
 
@@ -126,24 +132,64 @@ model WhatsappConnection {
 }
 
 model Contact {
-  id          String   @id @default(uuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
-  waId        String
-  displayName String?
-  profileName String?
-  metadata    Json     @default("{}")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String    @id @default(uuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
+  waId              String
+  displayName       String?
+  profileName       String?
+  email             String?
+  location          String?
+  // Free-form CRM pipeline label (e.g. New / Qualified / Customer).
+  leadStatus        String    @default("New")
+  source            String    @default("Manual")
+  notes             String?   @db.Text
+  assignedUserId    String?
+  assignedUser      User?     @relation(fields: [assignedUserId], references: [id])
+  // Set when the customer replies STOP (or an agent flags it). Opted-out
+  // contacts are always excluded from campaigns server-side.
+  optedOut          Boolean   @default(false)
+  optedOutAt        DateTime?
+  lastInteractionAt DateTime?
+  metadata          Json      @default("{}")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   conversations         Conversation[]
   broadcastRecipiencies BroadcastRecipient[]
   botSessions           BotSession[]
   orders                Order[]
+  tags                  ContactTag[]
 
   @@unique([tenantId, waId])
   @@index([tenantId])
+  @@index([tenantId, optedOut])
+  @@index([tenantId, createdAt])
   @@map("contacts")
+}
+
+model Tag {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String
+  createdAt DateTime @default(now())
+
+  contacts ContactTag[]
+
+  @@unique([tenantId, name])
+  @@map("tags")
+}
+
+model ContactTag {
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@index([tagId])
+  @@map("contact_tags")
 }
 
 enum ConversationStatus {
@@ -153,25 +199,25 @@ enum ConversationStatus {
 }
 
 model Conversation {
-  id                   String              @id @default(uuid())
+  id                   String             @id @default(uuid())
   tenantId             String
-  tenant               Tenant              @relation(fields: [tenantId], references: [id])
+  tenant               Tenant             @relation(fields: [tenantId], references: [id])
   contactId            String
-  contact              Contact             @relation(fields: [contactId], references: [id])
+  contact              Contact            @relation(fields: [contactId], references: [id])
   whatsappConnectionId String
-  whatsappConnection   WhatsappConnection  @relation(fields: [whatsappConnectionId], references: [id])
-  status               ConversationStatus  @default(open)
+  whatsappConnection   WhatsappConnection @relation(fields: [whatsappConnectionId], references: [id])
+  status               ConversationStatus @default(open)
   assignedAgentId      String?
-  assignedAgent        User?               @relation(fields: [assignedAgentId], references: [id])
+  assignedAgent        User?              @relation(fields: [assignedAgentId], references: [id])
   lastMessageAt        DateTime?
-  unreadCount          Int                 @default(0)
+  unreadCount          Int                @default(0)
   windowExpiresAt      DateTime?
-  createdAt            DateTime            @default(now())
-  updatedAt            DateTime            @updatedAt
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
-  messages    Message[]
-  botSession  BotSession?
-  orders      Order[]
+  messages   Message[]
+  botSession BotSession?
+  orders     Order[]
 
   @@index([tenantId, status])
   @@index([tenantId, lastMessageAt])
@@ -249,90 +295,151 @@ model Message {
 }
 
 // ---------------------------------------------------------------------------
-// Broadcast/campaign models (M4). A template holds reusable text with
-// {{name}}-style placeholders; a campaign sends one template to a chosen set
-// of existing Contacts (recipients), batched via the queue to avoid sending
-// hundreds of messages in a single tick. Each recipient send also lands as a
-// normal outbound Message (senderType: system) so it appears in that
-// contact's regular conversation thread, not just in campaign-only UI.
+// Bulk WhatsApp messaging.
+//
+// MessageTemplate mirrors a WhatsApp Business message template (the only
+// message type Meta allows for business-initiated / first-contact sends).
+// A BroadcastCampaign sends one APPROVED template to an audience of Contacts.
+// Recipient rows are materialised when the campaign starts (immediately, or
+// when its scheduledAt time arrives) so opt-outs that happened in between are
+// always honoured. Every send also lands as a normal outbound Message so it
+// appears in the contact's conversation thread.
 // ---------------------------------------------------------------------------
 
-model BroadcastTemplate {
-  id        String   @id @default(uuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  name      String
-  body      String
-  // When set, this template sends via Meta's approved WhatsApp Message
-  // Templates API (required outside the 24h session window / for
-  // first-contact bulk sends) instead of a free-text session message.
-  // metaTemplateName is the exact internal name from WhatsApp Manager
-  // (not the display title); metaVariableCount is how many positional
-  // {{1}}, {{2}}... placeholders the approved template body has, so
-  // campaign creation knows how many values to require per recipient.
-  metaTemplateName     String?
-  metaTemplateLanguage String?
-  metaVariableCount    Int?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum TemplateStatus {
+  draft
+  pending
+  approved
+  rejected
+}
+
+enum TemplateHeaderType {
+  none
+  text
+  image
+  video
+  document
+}
+
+model MessageTemplate {
+  id              String             @id @default(uuid())
+  tenantId        String
+  tenant          Tenant             @relation(fields: [tenantId], references: [id])
+  // Meta template name: lowercase letters, digits and underscores only.
+  name            String
+  // Display category from the UI (Welcome, Marketing, Payments, ...). Mapped
+  // to Meta's MARKETING / UTILITY at submission time.
+  category        String
+  // Language code Meta expects: en, en_US, hi, mr, ...
+  language        String             @default("en")
+  headerType      TemplateHeaderType @default(none)
+  headerText      String?
+  body            String             @db.Text
+  footer          String?
+  // Array<{ type: 'quick_reply' | 'cta_url' | 'cta_phone', label, value? }>
+  buttons         Json               @default("[]")
+  status          TemplateStatus     @default(draft)
+  metaTemplateId  String?
+  rejectionReason String?
+  submittedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   campaigns BroadcastCampaign[]
 
-  @@unique([tenantId, name])
-  @@index([tenantId])
-  @@map("broadcast_templates")
+  @@unique([tenantId, name, language])
+  @@index([tenantId, status])
+  @@map("message_templates")
 }
 
 enum BroadcastCampaignStatus {
   draft
-  sending
+  scheduled
+  running
+  paused
   completed
   failed
+  cancelled
 }
 
 model BroadcastCampaign {
-  id              String                   @id @default(uuid())
-  tenantId        String
-  tenant          Tenant                   @relation(fields: [tenantId], references: [id])
-  templateId      String
-  template        BroadcastTemplate        @relation(fields: [templateId], references: [id])
-  name            String
-  status          BroadcastCampaignStatus  @default(draft)
-  createdByUserId String
-  createdByUser   User                     @relation(fields: [createdByUserId], references: [id])
-  createdAt       DateTime                 @default(now())
-  updatedAt       DateTime                 @updatedAt
+  id                    String                  @id @default(uuid())
+  tenantId              String
+  tenant                Tenant                  @relation(fields: [tenantId], references: [id])
+  templateId            String
+  template              MessageTemplate         @relation(fields: [templateId], references: [id])
+  name                  String
+  objective             String?
+  description           String?                 @db.Text
+  status                BroadcastCampaignStatus @default(draft)
+  // Why the campaign is paused/failed/cancelled (shown in the UI).
+  statusReason          String?
+  // { mode: 'all' | 'tags' | 'contacts', tags: string[], contactIds: string[] }
+  audience              Json
+  // { header: VarSource[], body: VarSource[] } where
+  // VarSource = { source: 'field', field: 'name'|'firstName'|'phone'|'email'|'location', fallback?: string }
+  //           | { source: 'static', value: string }
+  variableMapping       Json                    @default("{}")
+  // Public HTTPS URL for image/video/document template headers.
+  headerMediaUrl        String?                 @db.Text
+  scheduledAt           DateTime?
+  startedAt             DateTime?
+  completedAt           DateTime?
+  // Set once the recipient rows for the audience have all been created.
+  materializedAt        DateTime?
+  // Soft lease so exactly one dispatcher drives a campaign at a time.
+  dispatcherLockedUntil DateTime?
+  totalRecipients       Int                     @default(0)
+  sentCount             Int                     @default(0)
+  deliveredCount        Int                     @default(0)
+  readCount             Int                     @default(0)
+  failedCount           Int                     @default(0)
+  skippedCount          Int                     @default(0)
+  createdByUserId       String
+  createdByUser         User                    @relation(fields: [createdByUserId], references: [id])
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
 
   recipients BroadcastRecipient[]
 
   @@index([tenantId, status])
+  @@index([status, scheduledAt])
+  @@index([tenantId, createdAt])
   @@map("broadcast_campaigns")
 }
 
 enum BroadcastRecipientStatus {
   pending
+  sending
   sent
+  delivered
+  read
   failed
+  skipped
 }
 
 model BroadcastRecipient {
-  id         String                    @id @default(uuid())
-  campaignId String
-  campaign   BroadcastCampaign         @relation(fields: [campaignId], references: [id])
-  contactId  String
-  contact    Contact                   @relation(fields: [contactId], references: [id])
-  status     BroadcastRecipientStatus  @default(pending)
-  messageId  String?
+  id          String                   @id @default(uuid())
+  campaignId  String
+  campaign    BroadcastCampaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contactId   String
+  contact     Contact                  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  status      BroadcastRecipientStatus @default(pending)
+  messageId   String?
+  // Meta's wamid, used to map delivery/read webhooks back to this row.
+  waMessageId String?                  @unique
+  attempts    Int                      @default(0)
+  errorCode   String?
   errorDetail Json?
-  // templateVariables shape: string[] positioned to fill {{1}}, {{2}}...
-  // in order, only used when the campaign's template has metaTemplateName
-  // set. Empty/null for internal free-text {{name}}-style templates.
-  templateVariables Json?
-  sentAt     DateTime?
-  createdAt  DateTime                  @default(now())
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  readAt      DateTime?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
 
   @@unique([campaignId, contactId])
   @@index([campaignId, status])
+  @@index([status, updatedAt])
   @@map("broadcast_recipients")
 }
 
@@ -442,14 +549,14 @@ model Machine {
 }
 
 model MachineConfigGroup {
-  id         String   @id @default(uuid())
+  id         String  @id @default(uuid())
   tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  tenant     Tenant  @relation(fields: [tenantId], references: [id])
   machineId  String
-  machine    Machine  @relation(fields: [machineId], references: [id])
+  machine    Machine @relation(fields: [machineId], references: [id])
   name       String
-  isRequired Boolean  @default(true)
-  sortOrder  Int      @default(0)
+  isRequired Boolean @default(true)
+  sortOrder  Int     @default(0)
 
   options MachineConfigOption[]
 
@@ -458,15 +565,15 @@ model MachineConfigGroup {
 }
 
 model MachineConfigOption {
-  id         String              @id @default(uuid())
+  id         String             @id @default(uuid())
   tenantId   String
-  tenant     Tenant              @relation(fields: [tenantId], references: [id])
+  tenant     Tenant             @relation(fields: [tenantId], references: [id])
   groupId    String
-  group      MachineConfigGroup  @relation(fields: [groupId], references: [id])
+  group      MachineConfigGroup @relation(fields: [groupId], references: [id])
   label      String
-  priceDelta Decimal             @default(0) @db.Decimal(12, 2)
-  isDefault  Boolean             @default(false)
-  sortOrder  Int                 @default(0)
+  priceDelta Decimal            @default(0) @db.Decimal(12, 2)
+  isDefault  Boolean            @default(false)
+  sortOrder  Int                @default(0)
 
   @@index([tenantId, groupId, sortOrder])
   @@map("machine_config_options")
@@ -479,33 +586,33 @@ enum OrderStatus {
 }
 
 model Order {
-  id             String       @id @default(uuid())
-  tenantId       String
-  tenant         Tenant       @relation(fields: [tenantId], references: [id])
-  contactId      String
-  contact        Contact      @relation(fields: [contactId], references: [id])
-  conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id])
-  machineId      String
-  machine        Machine      @relation(fields: [machineId], references: [id])
-  quantity       Int          @default(1)
+  id              String       @id @default(uuid())
+  tenantId        String
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  contactId       String
+  contact         Contact      @relation(fields: [contactId], references: [id])
+  conversationId  String
+  conversation    Conversation @relation(fields: [conversationId], references: [id])
+  machineId       String
+  machine         Machine      @relation(fields: [machineId], references: [id])
+  quantity        Int          @default(1)
   // selectedConfig shape: Array<{ groupId, groupName, optionId, optionLabel,
   // priceDelta }> — denormalized snapshot, so later catalog edits never
   // silently change the price of an already-placed order.
-  selectedConfig Json         @default("[]")
-  unitPrice      Decimal      @db.Decimal(12, 2)
-  subtotal       Decimal      @db.Decimal(12, 2)
-  gstAmount      Decimal      @db.Decimal(12, 2)
-  totalAmount    Decimal      @db.Decimal(12, 2)
+  selectedConfig  Json         @default("[]")
+  unitPrice       Decimal      @db.Decimal(12, 2)
+  subtotal        Decimal      @db.Decimal(12, 2)
+  gstAmount       Decimal      @db.Decimal(12, 2)
+  totalAmount     Decimal      @db.Decimal(12, 2)
   // deliveryAddress shape: { name, company?, mobile, email?, gstNumber?,
   // addressLine, city, state, pin } — snapshot, independent of any saved
   // address on Contact.metadata so historical orders never mutate.
   deliveryAddress Json
-  status         OrderStatus  @default(DRAFT)
-  confirmedAt    DateTime?
-  cancelledAt    DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  status          OrderStatus  @default(DRAFT)
+  confirmedAt     DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   botSession BotSession?
 

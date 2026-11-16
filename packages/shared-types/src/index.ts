@@ -4,3 +4,7 @@ export * from "./auth.types";
 export * from "./inbox.types";
 export * from "./broadcast.types";
 export * from "./commerce-bot.types";
+export * from "./common.types";
+export * from "./contact.types";
+export * from "./template.types";
+export * from "./whatsapp-account.types";

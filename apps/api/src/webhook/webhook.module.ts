@@ -7,6 +7,9 @@ import { WEBHOOK_EVENTS_QUEUE } from './webhook-queue.constants';
 import { RouterModule } from '../router/router.module';
 import { InboxModule } from '../inbox/inbox.module';
 import { WhatsappConnectionsModule } from '../whatsapp-connections/whatsapp-connections.module';
+import { BroadcastModule } from '../broadcast/broadcast.module';
+import { ContactsModule } from '../contacts/contacts.module';
+import { TemplatesModule } from '../templates/templates.module';
 
 @Module({
   imports: [
@@ -29,6 +32,9 @@ import { WhatsappConnectionsModule } from '../whatsapp-connections/whatsapp-conn
     RouterModule,
     InboxModule,
     WhatsappConnectionsModule,
+    BroadcastModule,
+    ContactsModule,
+    TemplatesModule,
   ],
   controllers: [WebhookController],
   providers: [WebhookProcessor],

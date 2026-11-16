@@ -59,5 +59,21 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.6.0"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*.spec.ts$",
+    "transform": {
+      "^.+.(t|j)s$": "ts-jest"
+    },
+    "testEnvironment": "node",
+    "moduleNameMapper": {
+      "^@whatsapp-crm/shared-types$": "<rootDir>/../../../packages/shared-types/src/index.ts"
+    }
   }
 }

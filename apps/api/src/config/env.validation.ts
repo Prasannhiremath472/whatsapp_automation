@@ -15,7 +15,7 @@ import { z } from "zod";
  * LLM_MODE and BILLING_MODE remain declared-but-unused until later
  * milestones.
  */
-export const envSchema = z.object({
+const baseEnvSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   JWT_ACCESS_SECRET: z.string().min(1, "JWT_ACCESS_SECRET is required"),
   JWT_REFRESH_SECRET: z.string().min(1, "JWT_REFRESH_SECRET is required"),
@@ -29,9 +29,31 @@ export const envSchema = z.object({
   META_WEBHOOK_VERIFY_TOKEN: z.string().default("dev-webhook-verify-token"),
   REDIS_URL: z.string().default("redis://localhost:6379"),
 
+  // Bulk messaging.
+  // 32 random bytes as 64 hex chars (openssl rand -hex 32). Required before a
+  // WhatsApp access token can be stored; never commit it.
+  ENCRYPTION_KEY: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, "ENCRYPTION_KEY must be 64 hex characters")
+    .optional(),
+  // Comma-separated browser origins allowed to call the API.
+  CORS_ORIGINS: z.string().default("http://localhost:5173,http://localhost:5174"),
+  // Max campaign messages sent per second per campaign (Meta allows up to 80).
+  BROADCAST_RATE_PER_SECOND: z.coerce.number().int().min(1).max(80).default(20),
+  // In mock mode, simulate delivered/read receipts for sent messages.
+  MOCK_AUTO_ACK: z.enum(["true", "false"]).default("true"),
+
   // Future milestones — optional at boot time so unset values don't block boot.
   LLM_MODE: z.string().optional(),
   BILLING_MODE: z.string().optional(),
+});
+
+export const envSchema = baseEnvSchema.superRefine((env, ctx) => {
+  if (env.WHATSAPP_MODE === "live") {
+    for (const key of ["META_APP_ID", "META_APP_SECRET"] as const) {
+      if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when WHATSAPP_MODE=live` });
+    }
+  }
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

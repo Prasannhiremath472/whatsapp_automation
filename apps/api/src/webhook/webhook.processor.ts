@@ -5,6 +5,9 @@ import { WEBHOOK_EVENTS_QUEUE } from './webhook-queue.constants';
 import type { WebhookPayload } from './webhook-payload.types';
 import { RouterService } from '../router/router.service';
 import { InboxService } from '../inbox/inbox.service';
+import { CampaignTracker } from '../broadcast/campaign-tracker.service';
+import { ContactsService } from '../contacts/contacts.service';
+import { TemplatesService } from '../templates/templates.service';
 
 /**
  * Consumes queued raw webhook payloads. For each entry[].changes[], resolves
@@ -20,6 +23,9 @@ export class WebhookProcessor extends WorkerHost {
   constructor(
     private readonly router: RouterService,
     private readonly inbox: InboxService,
+    private readonly tracker: CampaignTracker,
+    private readonly contacts: ContactsService,
+    private readonly templates: TemplatesService,
   ) {
     super();
   }
@@ -30,6 +36,13 @@ export class WebhookProcessor extends WorkerHost {
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
         const value = change.value;
+
+        // Template approval/rejection events are keyed by WABA id (entry.id) and carry no phone number.
+        if (change.field === 'message_template_status_update') {
+          await this.templates.applyStatusEvent(entry.id, value as unknown as Parameters<TemplatesService['applyStatusEvent']>[1]);
+          continue;
+        }
+
         const phoneNumberId = value?.metadata?.phone_number_id;
         if (!phoneNumberId) {
           this.logger.warn(`Webhook change missing metadata.phone_number_id; dropping. entryId=${entry.id}`);
@@ -44,10 +57,12 @@ export class WebhookProcessor extends WorkerHost {
 
         if (value.messages?.length) {
           await this.inbox.ingestInboundMessage(resolved.tenantId, resolved.connectionId, value);
+          await this.contacts.handleInboundMessages(resolved.tenantId, value.messages);
         }
 
         if (value.statuses?.length) {
           await this.inbox.ingestStatusUpdate(resolved.tenantId, value.statuses);
+          await this.tracker.handleStatuses(resolved.tenantId, value.statuses);
         }
       }
     }

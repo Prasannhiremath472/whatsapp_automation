@@ -13,6 +13,8 @@ import { RouterModule } from './router/router.module';
 import { InboxModule } from './inbox/inbox.module';
 import { AutomationModule } from './automation/automation.module';
 import { BroadcastModule } from './broadcast/broadcast.module';
+import { ContactsModule } from './contacts/contacts.module';
+import { TemplatesModule } from './templates/templates.module';
 import { CommerceBotModule } from './commerce-bot/commerce-bot.module';
 import { DevModule } from './dev/dev.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -35,6 +37,8 @@ const devOnlyImports = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     RouterModule,
     InboxModule,
     AutomationModule,
+    ContactsModule,
+    TemplatesModule,
     BroadcastModule,
     CommerceBotModule,
     WebhookModule,

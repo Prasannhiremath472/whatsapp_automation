@@ -111,6 +111,68 @@ async function upsertTenantWithUsers(params: {
   console.log(`[seed] ensured admin + ${params.agentEmails.length} agents for ${params.slug}`);
 }
 
+/**
+ * Demo data for the bulk-messaging screens: a connected (mock) WhatsApp
+ * number, an approved template and a handful of fictional contacts, so a
+ * campaign can be created and sent end to end on a fresh database. The
+ * phone numbers are made up; one ends in 0000, which the mock provider
+ * always rejects, to show how failures appear.
+ */
+async function seedBulkMessagingDemo(tenantSlug: string) {
+  const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
+  if (!tenant) return;
+
+  await prisma.whatsappConnection.upsert({
+    where: { tenantId: tenant.id },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      phoneNumberId: `mock-${tenant.id}`,
+      displayPhoneNumber: "+1 555-0100",
+      wabaId: `mock-waba-${tenant.id}`,
+      connectionStatus: "connected",
+      isMock: true,
+      webhookVerifyToken: "dev-webhook-verify-token",
+      connectedAt: new Date(),
+    },
+  });
+
+  await prisma.messageTemplate.upsert({
+    where: { tenantId_name_language: { tenantId: tenant.id, name: "welcome_offer", language: "en" } },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      name: "welcome_offer",
+      category: "Marketing",
+      language: "en",
+      body: "Hi {{1}}, thanks for being with us! Our new offers are live — reply STOP to opt out.",
+      status: "approved",
+      submittedAt: new Date(),
+    },
+  });
+
+  const names = ["Priya Sharma", "Rahul Mehta", "Ananya Iyer", "Vikram Desai", "Meera Kulkarni", "Arjun Nair", "Sana Sheikh", "Rohan Joshi"];
+  const tag = await prisma.tag.upsert({
+    where: { tenantId_name: { tenantId: tenant.id, name: "Demo list" } },
+    update: {},
+    create: { tenantId: tenant.id, name: "Demo list" },
+  });
+  for (const [i, name] of names.entries()) {
+    const waId = i === names.length - 1 ? "919800000000" : `91980000${String(100 + i).padStart(4, "0")}`;
+    const contact = await prisma.contact.upsert({
+      where: { tenantId_waId: { tenantId: tenant.id, waId } },
+      update: {},
+      create: { tenantId: tenant.id, waId, displayName: name, email: `${name.toLowerCase().replace(" ", ".")}@example.com`, location: ["Pune", "Mumbai", "Delhi"][i % 3], source: "Seed" },
+    });
+    await prisma.contactTag.upsert({
+      where: { contactId_tagId: { contactId: contact.id, tagId: tag.id } },
+      update: {},
+      create: { contactId: contact.id, tagId: tag.id },
+    });
+  }
+  console.log(`[seed] ensured bulk-messaging demo data for ${tenantSlug}`);
+}
+
 async function main() {
   console.log("[seed] starting (idempotent — safe to re-run)");
   console.log(`[seed] dev password for ALL seeded accounts: ${DEV_PASSWORD}`);
@@ -132,6 +194,8 @@ async function main() {
     adminEmail: "admin@bluebird-clinic.dev.local",
     agentEmails: ["agent1@bluebird-clinic.dev.local", "agent2@bluebird-clinic.dev.local"],
   });
+
+  await seedBulkMessagingDemo("acme-retail");
 
   console.log("[seed] done");
 }

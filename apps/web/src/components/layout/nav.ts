@@ -1,0 +1,7 @@
+import {LayoutDashboard,MessageSquare,Users,Megaphone,Workflow,Bot,FileText,BarChart3,Settings,LifeBuoy,Phone,Plug,KeyRound,Webhook,ScrollText,BookOpen,Code,User,type LucideIcon} from "lucide-react";
+export type NavItem={title:string;url:string;icon:LucideIcon;badge?:string};
+export const mainNav:NavItem[]=[{title:'Dashboard',url:'/',icon:LayoutDashboard},{title:'Team Inbox',url:'/inbox',icon:MessageSquare,badge:'6'},{title:'Contacts',url:'/contacts',icon:Users},{title:'Campaigns',url:'/campaigns',icon:Megaphone},{title:'Message Templates',url:'/templates',icon:FileText},{title:'Automations',url:'/automation',icon:Workflow},{title:'Genie AI Agents',url:'/ai-agents',icon:Bot},{title:'Analytics',url:'/analytics',icon:BarChart3}];
+export const businessNav:NavItem[]=[{title:'WhatsApp Accounts',url:'/whatsapp-accounts',icon:Phone},{title:'Users & Teams',url:'/teams',icon:Users},{title:'Integrations',url:'/integrations',icon:Plug}];
+export const developerNav:NavItem[]=[{title:'Get Started',url:'/developer',icon:Code},{title:'Channels',url:'/channels',icon:Phone},{title:'API Keys',url:'/api-keys',icon:KeyRound},{title:'Webhooks',url:'/webhooks',icon:Webhook},{title:'API Logs',url:'/api-logs',icon:ScrollText},{title:'API Documentation',url:'/api-docs',icon:BookOpen}];
+export const secondaryNav:NavItem[]=[{title:'Help & Support',url:'/help',icon:LifeBuoy},{title:'Settings',url:'/settings',icon:Settings},{title:'User Profile',url:'/profile',icon:User}];
+export const allNav=[...mainNav,...businessNav,...developerNav,...secondaryNav];

@@ -1,12 +1,27 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Post, Query, Res } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Logger,
+  Post,
+  Query,
+  Req,
+  Res,
+  UnauthorizedException,
+} from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { Inject } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
 import { WEBHOOK_EVENTS_QUEUE } from './webhook-queue.constants';
 import type { WebhookPayload } from './webhook-payload.types';
+import { verifyMetaSignature } from './webhook-signature';
 import { WHATSAPP_PROVIDER, type WhatsAppProvider } from '../whatsapp-connections/whatsapp-provider.interface';
 
 /**
@@ -26,6 +41,8 @@ import { WHATSAPP_PROVIDER, type WhatsAppProvider } from '../whatsapp-connection
  */
 @Controller('webhook')
 export class WebhookController {
+  private readonly logger = new Logger(WebhookController.name);
+
   constructor(
     private readonly config: ConfigService,
     @InjectQueue(WEBHOOK_EVENTS_QUEUE) private readonly queue: Queue,
@@ -54,7 +71,21 @@ export class WebhookController {
   @Public()
   @Post()
   @HttpCode(200)
-  async receive(@Body() body: unknown): Promise<{ received: true }> {
+  async receive(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('x-hub-signature-256') signature: string | undefined,
+    @Body() body: unknown,
+  ): Promise<{ received: true }> {
+    // In live mode every delivery must be signed by Meta with the app secret.
+    // (Mock/dev mode has no Meta app, so unsigned posts are accepted there only.)
+    if ((this.config.get<string>('WHATSAPP_MODE') ?? 'mock') === 'live') {
+      const secret = this.config.get<string>('META_APP_SECRET') ?? '';
+      if (!verifyMetaSignature(req.rawBody, signature, secret)) {
+        this.logger.warn('Rejected webhook POST with a missing or invalid X-Hub-Signature-256');
+        throw new UnauthorizedException('Invalid webhook signature');
+      }
+    }
+
     const payload = body as Partial<WebhookPayload>;
     if (!payload || payload.object !== 'whatsapp_business_account') {
       throw new BadRequestException('Unexpected webhook payload shape');

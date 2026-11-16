@@ -1,86 +1,55 @@
+/** Picks the most likely delimiter from the header line (comma, semicolon or tab). */
+export function detectDelimiter(text: string): string {
+  const firstLine = text.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0] ?? "";
+  const counts = [",", ";", "\t"].map((d) => ({ d, n: firstLine.split(d).length - 1 }));
+  counts.sort((a, b) => b.n - a.n);
+  return counts[0] && counts[0].n > 0 ? counts[0].d : ",";
+}
+
 /**
- * Minimal RFC 4180-ish CSV parser — handles quoted fields, escaped quotes
- * (""), and commas/newlines inside quotes. No external dependency needed
- * for the simple "phone, name, var1, var2..." shape broadcast CSVs use.
+ * Minimal RFC-4180 CSV parser: quoted fields, escaped quotes (""), embedded
+ * delimiters/newlines, CRLF or LF, and a leading BOM. Blank lines are skipped.
  */
-export function parseCsv(text: string): string[][] {
+export function parseCSV(text: string, delimiter = detectDelimiter(text)): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
+  let value = "";
+  let quoted = false;
+  const src = text.replace(/^\uFEFF/, "");
 
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    const next = text[i + 1];
+  const endRow = () => {
+    row.push(value);
+    value = "";
+    if (row.some((cell) => cell.trim() !== "")) rows.push(row);
+    row = [];
+  };
 
-    if (inQuotes) {
-      if (char === '"' && next === '"') {
-        field += '"';
-        i++;
-      } else if (char === '"') {
-        inQuotes = false;
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === '"') {
+      if (quoted && src[i + 1] === '"') {
+        value += '"';
+        i += 1;
       } else {
-        field += char;
+        quoted = !quoted;
       }
-      continue;
-    }
-
-    if (char === '"') {
-      inQuotes = true;
-    } else if (char === ",") {
-      row.push(field);
-      field = "";
-    } else if (char === "\n" || char === "\r") {
-      if (char === "\r" && next === "\n") i++;
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
+    } else if (ch === delimiter && !quoted) {
+      row.push(value);
+      value = "";
+    } else if ((ch === "\n" || ch === "\r") && !quoted) {
+      if (ch === "\r" && src[i + 1] === "\n") i += 1;
+      endRow();
     } else {
-      field += char;
+      value += ch;
     }
   }
-
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-
-  return rows.filter((r) => r.some((cell) => cell.trim().length > 0));
+  if (value !== "" || row.length > 0) endRow();
+  return rows;
 }
 
-export interface ParsedCsvRecipient {
-  waId: string;
-  name?: string;
-  templateVariables: string[];
-  rowNumber: number;
-  error?: string;
-}
-
-/**
- * Interprets parsed CSV rows as broadcast recipients. First row is treated
- * as a header if its first cell looks non-numeric (e.g. "phone"/"waId"
- * rather than a number) and is skipped; remaining columns after
- * phone/name become positional template variables in order.
- */
-export function csvRowsToRecipients(rows: string[][]): ParsedCsvRecipient[] {
-  if (rows.length === 0) return [];
-
-  const firstCell = rows[0][0]?.trim() ?? "";
-  const hasHeader = !/^\d{7,15}$/.test(firstCell.replace(/^\+/, ""));
-  const dataRows = hasHeader ? rows.slice(1) : rows;
-  const startRowNumber = hasHeader ? 2 : 1;
-
-  return dataRows.map((cells, idx) => {
-    const rowNumber = startRowNumber + idx;
-    const rawPhone = (cells[0] ?? "").trim().replace(/^\+/, "").replace(/[\s-]/g, "");
-    const name = cells[1]?.trim() || undefined;
-    const templateVariables = cells.slice(2).map((c) => c.trim());
-
-    if (!/^\d{7,15}$/.test(rawPhone)) {
-      return { waId: rawPhone, name, templateVariables, rowNumber, error: "Invalid phone number (expected digits with country code)" };
-    }
-
-    return { waId: rawPhone, name, templateVariables, rowNumber };
-  });
+/** Quotes a value for CSV output and neutralises spreadsheet formula injection. */
+export function csvCell(value: unknown): string {
+  let text = String(value ?? "");
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replaceAll('"', '""')}"`;
 }

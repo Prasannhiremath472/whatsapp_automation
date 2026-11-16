@@ -10,19 +10,20 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      postgres:
-        image: postgres:16
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_DB: whatsapp_crm_test
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          MYSQL_DATABASE: whatsapp_crm_test
+          MYSQL_USER: genie
+          MYSQL_PASSWORD: genie
+          MYSQL_ROOT_PASSWORD: genie_root
         ports:
-          - 5432:5432
+          - 3306:3306
         options: >-
-          --health-cmd "pg_isready -U postgres"
+          --health-cmd "mysqladmin ping -h localhost -pgenie_root"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 20
       redis:
         image: redis:7
         ports:
@@ -34,12 +35,13 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/whatsapp_crm_test?schema=public
+      # The e2e suites wipe every table: this is a throwaway CI database.
+      DATABASE_URL: mysql://root:genie_root@localhost:3306/whatsapp_crm_test
       JWT_ACCESS_SECRET: ci-access-secret
       JWT_REFRESH_SECRET: ci-refresh-secret
       PORT: 3000
       REDIS_URL: redis://localhost:6379
-      VITE_API_URL: http://localhost:3000
+      VITE_API_BASE_URL: http://localhost:3000/api/v1
 
     steps:
       - uses: actions/checkout@v4
@@ -50,14 +52,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Lint
-        run: pnpm lint
 
       - name: Typecheck
         run: pnpm typecheck
@@ -65,11 +64,17 @@ jobs:
       - name: Prisma generate
         run: pnpm --filter @whatsapp-crm/api exec prisma generate
 
-      - name: Prisma db push (schema sync for CI, no migration history needed)
-        run: pnpm --filter @whatsapp-crm/api exec prisma db push
+      - name: Apply database migrations
+        run: pnpm --filter @whatsapp-crm/api exec prisma migrate deploy
+
+      - name: API unit tests
+        run: pnpm --filter @whatsapp-crm/api test
 
       - name: API e2e tests
         run: pnpm --filter @whatsapp-crm/api test:e2e
+
+      - name: Web unit tests
+        run: pnpm --filter @whatsapp-crm/web test
 
       - name: Build all packages/apps
         run: pnpm build

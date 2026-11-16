@@ -1,8 +1,10 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import type { AuthResponse } from '@whatsapp-crm/shared-types';
 import { LoginRequestSchema, RegisterRequestSchema } from '@whatsapp-crm/shared-types';
 import { AuthService } from './auth.service';
 import { Public } from '../common/decorators/public.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { JwtClaims } from '@whatsapp-crm/shared-types';
 
 @Controller('auth')
 export class AuthController {
@@ -23,6 +25,11 @@ export class AuthController {
   async register(@Body() body: unknown): Promise<AuthResponse> {
     const parsed = RegisterRequestSchema.parse(body);
     return this.authService.registerFirstSuperAdmin(parsed);
+  }
+
+  @Get('me')
+  me(@CurrentUser() claims: JwtClaims) {
+    return this.authService.getProfile(claims.sub);
   }
 
   @Public()

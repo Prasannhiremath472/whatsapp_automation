@@ -7,10 +7,13 @@ import {
   Logger,
 } from "@nestjs/common";
 import { Request, Response } from "express";
+import { ZodError } from "zod";
 
 /**
  * Global exception filter producing a consistent JSON error shape:
- * { statusCode, message, error, path, timestamp }
+ * { statusCode, message, error, path, timestamp, issues? }
+ *
+ * `issues` is present for validation failures: [{ path, message }].
  */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -24,8 +27,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = "Internal server error";
     let error = "Internal Server Error";
+    let issues: { path: string; message: string }[] | undefined;
 
-    if (exception instanceof HttpException) {
+    if (exception instanceof ZodError) {
+      // Controllers that still call schema.parse() directly land here.
+      statusCode = HttpStatus.BAD_REQUEST;
+      message = "Validation failed";
+      error = "Bad Request";
+      issues = exception.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
+    } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const res = exception.getResponse();
       if (typeof res === "string") {
@@ -35,10 +45,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
         const r = res as Record<string, unknown>;
         message = (r.message as string | string[]) ?? exception.message;
         error = (r.error as string) ?? exception.name;
+        if (Array.isArray(r.issues)) issues = r.issues as { path: string; message: string }[];
       }
     } else if (exception instanceof Error) {
-      message = exception.message;
-      error = exception.name;
+      // Never leak internals for unexpected errors.
       this.logger.error(exception.message, exception.stack);
     }
 
@@ -46,6 +56,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode,
       message,
       error,
+      ...(issues ? { issues } : {}),
       path: request.url,
       timestamp: new Date().toISOString(),
     });

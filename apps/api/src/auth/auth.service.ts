@@ -128,6 +128,27 @@ export class AuthService {
     return this.issueTokens(user);
   }
 
+  /** The signed-in user plus their organisation, used by the web apps to restore a session. */
+  async getProfile(userId: string): Promise<{
+    user: User;
+    tenant: { id: string; name: string; slug: string; businessCategory: string | null; timezone: string } | null;
+  }> {
+    const rows = await this.db.query<UserRow[]>("SELECT * FROM users WHERE id = ? LIMIT 1", [userId]);
+    const user = rows[0];
+    if (!user || !user.isActive) throw new UnauthorizedException("Invalid session");
+
+    let tenant = null;
+    if (user.tenantId) {
+      const tenants = await this.db.query<(RowDataPacket & { id: string; name: string; slug: string; business_category: string | null; timezone: string })[]>(
+        "SELECT id, name, slug, business_category, timezone FROM tenants WHERE id = ? LIMIT 1",
+        [user.tenantId],
+      );
+      const t = tenants[0];
+      if (t) tenant = { id: t.id, name: t.name, slug: t.slug, businessCategory: t.business_category, timezone: t.timezone };
+    }
+    return { user: toPublicUser(user), tenant };
+  }
+
   async refresh(refreshToken: string): Promise<AuthResponse> {
     const tokenHash = hashToken(refreshToken);
     const stored = await this.db.query<RefreshTokenRow[]>(

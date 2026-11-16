@@ -1,7 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { WhatsappConnection } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import type { WhatsAppButton, WhatsAppListSection, WhatsAppProvider } from '../whatsapp-provider.interface';
+import {
+  WhatsAppSendError,
+  type RemoteTemplate,
+  type TemplateComponent,
+  type TemplateSubmission,
+  type WhatsAppButton,
+  type WhatsAppListSection,
+  type WhatsAppProvider,
+} from '../whatsapp-provider.interface';
+
+/**
+ * Recipients whose number ends in this suffix always fail with a permanent
+ * "not on WhatsApp" error, so the failure path of a campaign can be exercised
+ * locally without real Meta credentials.
+ */
+export const MOCK_FAIL_SUFFIX = '0000';
 
 /**
  * Default provider used in local dev / e2e tests (WHATSAPP_MODE=mock, the
@@ -30,15 +45,40 @@ export class WhatsAppMockProvider implements WhatsAppProvider {
     toWaId: string,
     templateName: string,
     languageCode: string,
-    bodyParams: string[],
+    components: TemplateComponent[],
   ): Promise<{ waMessageId: string }> {
+    if (toWaId.endsWith(MOCK_FAIL_SUFFIX)) {
+      throw new WhatsAppSendError('Recipient phone number is not a WhatsApp number (mock)', '131026', 400, false);
+    }
     const waMessageId = `mock-msg-${randomUUID()}`;
-    this.logger.log(
-      `[mock] sendTemplateMessage connection=${connection.id} to=${toWaId} template=${templateName} lang=${languageCode} params=${JSON.stringify(
-        bodyParams,
+    this.logger.debug(
+      `[mock] sendTemplateMessage connection=${connection.id} to=${toWaId} template=${templateName} lang=${languageCode} components=${JSON.stringify(
+        components,
       )} -> ${waMessageId}`,
     );
     return { waMessageId };
+  }
+
+  async connectAccount(credentials: {
+    wabaId: string;
+    phoneNumberId: string;
+    accessToken: string;
+  }): Promise<{ displayPhoneNumber: string | null; verifiedName: string | null }> {
+    this.logger.log(`[mock] connectAccount phoneNumberId=${credentials.phoneNumberId}`);
+    return { displayPhoneNumber: null, verifiedName: null };
+  }
+
+  async submitTemplate(
+    connection: WhatsappConnection,
+    template: TemplateSubmission,
+  ): Promise<{ metaTemplateId: string; status: 'pending' | 'approved' }> {
+    // No reviewer in mock mode: templates are approved immediately.
+    this.logger.log(`[mock] submitTemplate connection=${connection.id} name=${template.name} -> approved`);
+    return { metaTemplateId: `mock-tpl-${randomUUID()}`, status: 'approved' };
+  }
+
+  async fetchTemplates(): Promise<RemoteTemplate[]> {
+    return [];
   }
 
   async sendListMessage(

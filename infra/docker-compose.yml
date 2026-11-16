@@ -1,30 +1,32 @@
+# Local development services. The API uses MySQL (the target hosting only
+# supports MySQL) and Redis (BullMQ queues). Ports are offset from the
+# defaults so these never collide with a MySQL/Redis already on your machine.
 services:
-  postgres:
-    image: postgres:16
-    container_name: whatsapp_crm_postgres
+  mysql:
+    image: mysql:8.0
+    container_name: whatsapp_crm_mysql
     restart: unless-stopped
     environment:
-      POSTGRES_DB: whatsapp_crm_dev
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      MYSQL_DATABASE: whatsapp_crm_dev
+      MYSQL_USER: genie
+      MYSQL_PASSWORD: genie
+      MYSQL_ROOT_PASSWORD: genie_root
     ports:
-      - "5433:5432"
+      - "3307:3306"
     volumes:
-      - whatsapp_crm_postgres_data:/var/lib/postgresql/data
+      - whatsapp_crm_mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pgenie_root"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   redis:
     image: redis:7
     container_name: whatsapp_crm_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
-    # Not consumed by application code until M2+ (queues/cache), present now
-    # per the infra plan.
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -32,4 +34,4 @@ services:
       retries: 10
 
 volumes:
-  whatsapp_crm_postgres_data:
+  whatsapp_crm_mysql_data:
