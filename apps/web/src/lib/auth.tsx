@@ -40,6 +40,8 @@ interface AuthContextValue {
   state: AuthState;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Re-reads the signed-in user and business (after the user edits them). */
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -120,7 +122,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ status: "anonymous" });
   }, [queryClient]);
 
-  const value = useMemo(() => ({ state, login, logout }), [state, login, logout]);
+  const value = useMemo(
+    () => ({ state, login, logout, refreshProfile: loadProfile }),
+    [state, login, logout, loadProfile],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

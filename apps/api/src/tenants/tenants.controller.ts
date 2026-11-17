@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import type { Tenant, User } from '@whatsapp-crm/shared-types';
-import { CreateTenantRequestSchema, UpdateTenantRequestSchema } from '@whatsapp-crm/shared-types';
+import { CreateTenantRequestSchema, UpdateMyTenantRequestSchema, UpdateTenantRequestSchema } from '@whatsapp-crm/shared-types';
 import { TenantsService } from './tenants.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -27,6 +27,15 @@ export class TenantsController {
       throw new NotFoundException('No tenant associated with this account');
     }
     return this.tenantsService.findById(user.tenantId);
+  }
+
+  @Patch('me')
+  @Roles('tenant_admin')
+  async updateMyTenant(@CurrentUser() user: JwtClaims, @Body() body: unknown): Promise<Tenant> {
+    if (!user.tenantId) {
+      throw new NotFoundException('No tenant associated with this account');
+    }
+    return this.tenantsService.updateOwn(user.tenantId, UpdateMyTenantRequestSchema.parse(body));
   }
 
   @Post()

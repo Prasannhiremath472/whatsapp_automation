@@ -42,3 +42,21 @@ export const UpdateTenantRequestSchema = z.object({
   status: TenantStatusSchema.optional(),
 });
 export type UpdateTenantRequest = z.infer<typeof UpdateTenantRequestSchema>;
+
+/** True when `tz` is an IANA time zone this runtime understands (e.g. Asia/Kolkata). */
+function isTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** DTO for PATCH /tenants/me (a business admin edits their own business). */
+export const UpdateMyTenantRequestSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  business_category: z.string().trim().max(100).nullable().optional(),
+  timezone: z.string().trim().refine(isTimeZone, "Unknown time zone").optional(),
+});
+export type UpdateMyTenantRequest = z.infer<typeof UpdateMyTenantRequestSchema>;

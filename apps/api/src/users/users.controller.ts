@@ -1,6 +1,14 @@
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, UseGuards } from "@nestjs/common";
 import type { CreateUserRequest, UpdateUserRequest, User } from "@whatsapp-crm/shared-types";
-import { CreateUserRequestSchema, UpdateUserRequestSchema } from "@whatsapp-crm/shared-types";
+import {
+  ChangePasswordRequestSchema,
+  CreateUserRequestSchema,
+  ResetPasswordRequestSchema,
+  UpdateMyProfileRequestSchema,
+  UpdateUserRequestSchema,
+} from "@whatsapp-crm/shared-types";
+import { CurrentUser } from "../common/decorators/current-user.decorator";
+import type { JwtClaims } from "@whatsapp-crm/shared-types";
 import { UsersService } from "./users.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
@@ -35,10 +43,25 @@ export class UsersController {
     return this.usersService.listInTenant(tenantId);
   }
 
+  /** The signed-in user edits their own profile. Declared before ":id" so "me" is not read as an id. */
+  @Roles("tenant_admin", "agent")
+  @Patch("me")
+  updateMe(@CurrentUser() claims: JwtClaims, @Body() body: unknown): Promise<User> {
+    return this.usersService.updateMyProfile(claims.sub, UpdateMyProfileRequestSchema.parse(body));
+  }
+
+  @Roles("tenant_admin", "agent")
+  @Post("me/password")
+  @HttpCode(204)
+  async changeMyPassword(@CurrentUser() claims: JwtClaims, @Body() body: unknown): Promise<void> {
+    await this.usersService.changeMyPassword(claims.sub, ChangePasswordRequestSchema.parse(body));
+  }
+
   @Roles("tenant_admin")
   @Patch(":id")
   update(
     @CurrentTenant() tenantId: string | null,
+    @CurrentUser() claims: JwtClaims,
     @Param("id") id: string,
     @Body() body: unknown,
   ): Promise<User> {
@@ -46,6 +69,20 @@ export class UsersController {
       throw new ForbiddenException("This account is not associated with a tenant");
     }
     const parsed: UpdateUserRequest = UpdateUserRequestSchema.parse(body);
-    return this.usersService.updateInTenant(tenantId, id, parsed);
+    return this.usersService.updateInTenant(tenantId, id, parsed, claims.sub);
+  }
+
+  @Roles("tenant_admin")
+  @Post(":id/reset-password")
+  @HttpCode(204)
+  async resetPassword(
+    @CurrentTenant() tenantId: string | null,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() body: unknown,
+  ): Promise<void> {
+    if (!tenantId) {
+      throw new ForbiddenException("This account is not associated with a tenant");
+    }
+    await this.usersService.resetPasswordInTenant(tenantId, id, ResetPasswordRequestSchema.parse(body).newPassword);
   }
 }

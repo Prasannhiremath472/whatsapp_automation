@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
 import type { RowDataPacket } from 'mysql2';
-import type { CreateTenantRequest, Tenant, UpdateTenantRequest, User } from '@whatsapp-crm/shared-types';
+import type { CreateTenantRequest, Tenant, UpdateMyTenantRequest, UpdateTenantRequest, User } from '@whatsapp-crm/shared-types';
 import { DatabaseService } from '../database/database.service';
 
 const BCRYPT_ROUNDS = 10;
@@ -133,6 +133,30 @@ export class TenantsService {
       await this.db.execute(`UPDATE tenants SET ${setClauses.join(', ')}, updatedAt = NOW(3) WHERE id = ?`, params);
     }
 
+    return this.findById(id);
+  }
+
+  /** A business admin edits their own business (name, category, time zone). */
+  async updateOwn(id: string, input: UpdateMyTenantRequest): Promise<Tenant> {
+    await this.findById(id);
+    const setClauses: string[] = [];
+    const params: (string | null)[] = [];
+    if (input.name !== undefined) {
+      setClauses.push('name = ?');
+      params.push(input.name);
+    }
+    if (input.business_category !== undefined) {
+      setClauses.push('business_category = ?');
+      params.push(input.business_category || null);
+    }
+    if (input.timezone !== undefined) {
+      setClauses.push('timezone = ?');
+      params.push(input.timezone);
+    }
+    if (setClauses.length > 0) {
+      params.push(id);
+      await this.db.execute(`UPDATE tenants SET ${setClauses.join(', ')}, updatedAt = NOW(3) WHERE id = ?`, params);
+    }
     return this.findById(id);
   }
 }

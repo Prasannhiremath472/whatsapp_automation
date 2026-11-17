@@ -1,2 +1,3 @@
-import { SettingsPage } from '@/components/genie/BusinessPages';
-export default SettingsPage;
+import { BusinessSettingsPage } from "@/components/settings/SettingsPage";
+
+export default BusinessSettingsPage;

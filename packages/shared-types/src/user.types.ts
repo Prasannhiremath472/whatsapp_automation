@@ -38,6 +38,26 @@ export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 /** DTO for PATCH /users/:id */
 export const UpdateUserRequestSchema = z.object({
   isActive: z.boolean().optional(),
-  displayName: z.string().min(1).optional(),
+  displayName: z.string().trim().min(1).max(100).optional(),
+  role: z.enum(["tenant_admin", "agent"]).optional(),
 });
 export type UpdateUserRequest = z.infer<typeof UpdateUserRequestSchema>;
+
+/** DTO for PATCH /users/me (the signed-in user edits their own profile) */
+export const UpdateMyProfileRequestSchema = z.object({
+  displayName: z.string().trim().min(1).max(100),
+});
+export type UpdateMyProfileRequest = z.infer<typeof UpdateMyProfileRequestSchema>;
+
+const newPassword = z.string().min(8, "Use at least 8 characters").max(100);
+
+/** DTO for POST /users/me/password */
+export const ChangePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword,
+});
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
+
+/** DTO for POST /users/:id/reset-password (a business admin sets a teammate's password) */
+export const ResetPasswordRequestSchema = z.object({ newPassword });
+export type ResetPasswordRequest = z.infer<typeof ResetPasswordRequestSchema>;

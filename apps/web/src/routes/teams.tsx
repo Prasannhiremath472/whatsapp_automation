@@ -1,2 +1,3 @@
-import { TeamsPage } from '@/components/genie/BusinessPages';
-export default TeamsPage;
+import { TeamPage } from "@/components/team/TeamPage";
+
+export default TeamPage;
