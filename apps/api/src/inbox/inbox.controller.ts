@@ -1,9 +1,11 @@
-import { Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import type { Conversation, Message } from '@prisma/client';
 import {
   AssignConversationRequestSchema,
   SendMessageRequestSchema,
+  SendTemplateMessageRequestSchema,
   UpdateConversationStatusRequestSchema,
+  describeMessage,
 } from '@whatsapp-crm/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -34,7 +36,8 @@ export class InboxController {
     @CurrentUser() user: { sub: string },
     @Query('assignedToMe') assignedToMe?: string,
     @Query('status') status?: string,
-  ): Promise<Conversation[]> {
+    @Query('limit') limit?: string,
+  ) {
     if (!tenantId) {
       throw new ForbiddenException('This account is not associated with a tenant');
     }
@@ -46,11 +49,47 @@ export class InboxController {
     if (status === 'open' || status === 'pending' || status === 'closed') {
       where.status = status;
     }
+    const take = Math.min(Math.max(Number(limit) || 100, 1), 200);
 
-    return this.prisma.conversation.findMany({
+    const rows = await this.prisma.conversation.findMany({
       where,
       orderBy: { lastMessageAt: 'desc' },
-      include: { contact: true },
+      take,
+      include: {
+        contact: { include: { tags: { include: { tag: true } } } },
+        assignedAgent: { select: { id: true, displayName: true } },
+      },
+    });
+
+    // The preview line of each conversation: one indexed lookup per row (at most `take`).
+    const latest = await Promise.all(
+      rows.map((c) =>
+        this.prisma.message.findFirst({
+          where: { tenantId, conversationId: c.id },
+          orderBy: { createdAt: 'desc' },
+          select: { direction: true, messageType: true, content: true, status: true, createdAt: true },
+        }),
+      ),
+    );
+
+    const windows = await Promise.all(rows.map((c) => this.inboxService.ensureReplyWindow(c)));
+
+    return rows.map((c, i) => {
+      const m = latest[i];
+      return {
+        ...c,
+        windowExpiresAt: windows[i],
+        contactTags: c.contact.tags.map((t) => t.tag.name),
+        lastMessage: m
+          ? {
+              direction: m.direction,
+              messageType: m.messageType,
+              preview: describeMessage(m.messageType, m.content),
+              status: m.status,
+              createdAt: m.createdAt,
+            }
+          : null,
+      };
     });
   }
 
@@ -73,12 +112,14 @@ export class InboxController {
       throw new NotFoundException('Conversation not found');
     }
 
-    return this.prisma.message.findMany({
+    const rows = await this.prisma.message.findMany({
       where: { tenantId, conversationId },
       orderBy: { createdAt: 'desc' },
-      take: limit ? Number(limit) : 50,
+      take: limit ? Math.min(Number(limit), 200) : 50,
       skip: offset ? Number(offset) : 0,
     });
+    // `text` is the plain-text rendering of `content`, so clients don't each re-implement it.
+    return rows.map((m) => ({ ...m, text: describeMessage(m.messageType, m.content) })) as unknown as Message[];
   }
 
   @Roles('tenant_admin', 'agent')
@@ -94,6 +135,31 @@ export class InboxController {
     }
     const input = SendMessageRequestSchema.parse(body);
     return this.inboxService.sendOutboundMessage(tenantId, conversationId, user.sub, input);
+  }
+
+  @Roles('tenant_admin', 'agent')
+  @Post(':id/template-messages')
+  async sendTemplateMessage(
+    @CurrentTenant() tenantId: string | null,
+    @CurrentUser() user: { sub: string },
+    @Param('id') conversationId: string,
+    @Body() body: unknown,
+  ): Promise<Message> {
+    if (!tenantId) {
+      throw new ForbiddenException('This account is not associated with a tenant');
+    }
+    const input = SendTemplateMessageRequestSchema.parse(body);
+    return this.inboxService.sendTemplateMessage(tenantId, conversationId, user.sub, input);
+  }
+
+  @Roles('tenant_admin', 'agent')
+  @Post(':id/read')
+  @HttpCode(200)
+  async markRead(@CurrentTenant() tenantId: string | null, @Param('id') conversationId: string): Promise<Conversation> {
+    if (!tenantId) {
+      throw new ForbiddenException('This account is not associated with a tenant');
+    }
+    return this.inboxService.markRead(tenantId, conversationId);
   }
 
   @Roles('tenant_admin', 'agent')

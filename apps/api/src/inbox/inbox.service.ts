@@ -1,11 +1,15 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Conversation, Message, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { WebhookChangeValue, WebhookInboundMessage, WebhookStatus } from '../webhook/webhook-payload.types';
 import { WHATSAPP_PROVIDER, type WhatsAppProvider } from '../whatsapp-connections/whatsapp-provider.interface';
-import type { SendMessageRequest } from '@whatsapp-crm/shared-types';
+import { fillVariables, variableCount, type SendMessageRequest, type SendTemplateMessageRequest } from '@whatsapp-crm/shared-types';
+import { buildTemplateComponents } from '../broadcast/variable-resolver';
 import { INBOX_EVENTS } from './inbox-events.constants';
+
+/** WhatsApp's customer-service window: free-form replies are allowed for 24 hours after the customer's last message. */
+export const REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 function mapMessageTypeAndContent(msg: WebhookInboundMessage): { messageType: MessageType; content: Record<string, unknown> } {
   switch (msg.type) {
@@ -124,11 +128,14 @@ export class InboxService {
         },
       });
 
+      const receivedAt = new Date(Number(msg.timestamp) * 1000 || Date.now());
       const updatedConversation = await this.prisma.conversation.update({
         where: { id: conversation.id },
         data: {
-          lastMessageAt: new Date(Number(msg.timestamp) * 1000 || Date.now()),
+          lastMessageAt: receivedAt,
           unreadCount: { increment: 1 },
+          // WhatsApp lets us send free-form replies for 24 hours after the customer's last message.
+          windowExpiresAt: new Date(receivedAt.getTime() + REPLY_WINDOW_MS),
         },
         include: { contact: true },
       });
@@ -230,6 +237,12 @@ export class InboxService {
     input: SendMessageRequest,
   ): Promise<Message> {
     const conversation = await this.findConversationOrThrow(tenantId, conversationId);
+    const windowEnd = await this.ensureReplyWindow(conversation);
+    if (!windowEnd || windowEnd.getTime() < Date.now()) {
+      throw new ConflictException(
+        'The 24-hour reply window has closed. WhatsApp only allows an approved template message now.',
+      );
+    }
 
     const [contact, connection] = await Promise.all([
       this.prisma.contact.findUnique({ where: { id: conversation.contactId } }),
@@ -304,6 +317,117 @@ export class InboxService {
     this.events.emit(INBOX_EVENTS.MESSAGE_NEW, { tenantId, message, conversation: updatedConversation });
 
     return message;
+  }
+
+  /**
+   * Replies in a conversation with an approved template. Unlike free text this
+   * is allowed outside the 24-hour window (it is how a business re-opens one).
+   */
+  async sendTemplateMessage(
+    tenantId: string,
+    conversationId: string,
+    senderUserId: string,
+    input: SendTemplateMessageRequest,
+  ): Promise<Message> {
+    const conversation = await this.findConversationOrThrow(tenantId, conversationId);
+    const template = await this.prisma.messageTemplate.findFirst({ where: { id: input.templateId, tenantId } });
+    if (!template) throw new NotFoundException('Template not found');
+    if (template.status !== 'approved') throw new BadRequestException('Only approved templates can be sent');
+
+    const [contact, connection] = await Promise.all([
+      this.prisma.contact.findUnique({ where: { id: conversation.contactId } }),
+      this.prisma.whatsappConnection.findUnique({ where: { id: conversation.whatsappConnectionId } }),
+    ]);
+    if (!contact || !connection) {
+      throw new BadRequestException('Conversation is missing its contact or WhatsApp connection');
+    }
+    if (contact.optedOut) throw new BadRequestException('This contact has opted out of messages');
+
+    const bodyCount = variableCount(template.body);
+    if (input.bodyVars.length !== bodyCount) {
+      throw new BadRequestException(`This template needs ${bodyCount} value(s) for its variables`);
+    }
+    const headerCount = template.headerType === 'text' && template.headerText ? Math.min(1, variableCount(template.headerText)) : 0;
+    if (input.headerVars.length !== headerCount) {
+      throw new BadRequestException(`This template needs ${headerCount} value(s) for its header`);
+    }
+    const mediaHeader = ['image', 'video', 'document'].includes(template.headerType);
+    const headerMediaUrl = mediaHeader ? (input.headerMediaUrl ?? template.headerMediaUrl ?? null) : null;
+    if (mediaHeader && !headerMediaUrl) {
+      throw new BadRequestException(`This template needs a ${template.headerType} for its header`);
+    }
+
+    const components = buildTemplateComponents(template, input.headerVars, input.bodyVars, headerMediaUrl);
+    let message = await this.prisma.message.create({
+      data: {
+        tenantId,
+        conversationId: conversation.id,
+        direction: 'outbound',
+        senderType: 'agent',
+        senderUserId,
+        messageType: 'template',
+        content: {
+          templateName: template.name,
+          language: template.language,
+          bodyParams: input.bodyVars,
+          body: fillVariables(template.body, input.bodyVars),
+          ...(headerMediaUrl ? { headerMediaUrl } : {}),
+        },
+        status: 'queued',
+      },
+    });
+
+    try {
+      const { waMessageId } = await this.whatsappProvider.sendTemplateMessage(
+        connection,
+        contact.waId,
+        template.name,
+        template.language,
+        components,
+      );
+      message = await this.prisma.message.update({ where: { id: message.id }, data: { waMessageId, status: 'sent' } });
+    } catch (err) {
+      const errorDetail = { message: err instanceof Error ? err.message : String(err) };
+      message = await this.prisma.message.update({ where: { id: message.id }, data: { status: 'failed', errorDetail } });
+      this.logger.warn(`Template send failed conversationId=${conversationId}: ${errorDetail.message}`);
+    }
+
+    const updatedConversation = await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { lastMessageAt: new Date() },
+      include: { contact: true },
+    });
+    this.events.emit(INBOX_EVENTS.MESSAGE_NEW, { tenantId, message, conversation: updatedConversation });
+    return message;
+  }
+
+  /**
+   * The end of the free-reply window. Conversations that predate window tracking have none stored, so it is
+   * worked out once from the customer's last message and saved.
+   */
+  async ensureReplyWindow(conversation: Pick<Conversation, 'id' | 'tenantId' | 'windowExpiresAt'>): Promise<Date | null> {
+    if (conversation.windowExpiresAt) return conversation.windowExpiresAt;
+    const lastInbound = await this.prisma.message.findFirst({
+      where: { tenantId: conversation.tenantId, conversationId: conversation.id, direction: 'inbound' },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    if (!lastInbound) return null;
+    const expires = new Date(lastInbound.createdAt.getTime() + REPLY_WINDOW_MS);
+    await this.prisma.conversation.update({ where: { id: conversation.id }, data: { windowExpiresAt: expires } });
+    return expires;
+  }
+
+  /** Marks everything in the conversation as read by the team (clears the unread badge). */
+  async markRead(tenantId: string, conversationId: string): Promise<Conversation> {
+    await this.findConversationOrThrow(tenantId, conversationId);
+    const conversation = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { unreadCount: 0 },
+      include: { contact: true },
+    });
+    this.events.emit(INBOX_EVENTS.CONVERSATION_UPDATED, { tenantId, conversation });
+    return conversation;
   }
 
   /**

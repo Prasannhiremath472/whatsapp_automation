@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useConversations } from "@/api/inbox";
 import { useSession } from "@/lib/auth";
 import { toast } from "sonner";
 import { useState } from "react";
@@ -31,6 +32,10 @@ import { mainNav, businessNav, developerNav, secondaryNav, type NavItem } from "
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   const { setOpenMobile } = useSidebar();
+  // The inbox badge is the real number of conversations with unread customer messages.
+  const conversations = useConversations({ enabled: item.url === "/inbox" });
+  const unread = (conversations.data ?? []).filter((c) => c.unreadCount > 0).length;
+  const badge = item.url === "/inbox" ? (unread > 0 ? String(unread) : undefined) : item.badge;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild isActive={active} tooltip={item.title} className="h-9 font-medium">
@@ -39,7 +44,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
           <span>{item.title}</span>
         </Link>
       </SidebarMenuButton>
-      {item.badge && <SidebarMenuBadge className="bg-primary-soft text-primary">{item.badge}</SidebarMenuBadge>}
+      {badge && <SidebarMenuBadge className="bg-primary-soft text-primary">{badge}</SidebarMenuBadge>}
     </SidebarMenuItem>
   );
 }
