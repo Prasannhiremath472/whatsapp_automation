@@ -28,10 +28,10 @@ Known limits of this phase
 
 | Screen | Needs |
 | --- | --- |
-| Team Inbox | Backend exists (`/conversations`, Socket.IO, assignment, status). Rewire the new inbox UI to it; templates picker → send template message in a conversation |
-| Users & Teams | `/users` exists (create/list/deactivate). Add: teams, invite flow, role change, password change |
-| Profile, Settings | `GET/PATCH` profile, change password, tenant settings (name, category, **timezone**, notification prefs) |
-| Dashboard, Analytics | Aggregate endpoints over messages / conversations / campaigns / contacts (counts per day, response time, campaign funnel) |
+| Team Inbox ✅ | Done: the inbox UI uses `/conversations` (polling every few seconds instead of Socket.IO, which is not dependable on shared hosting), mark-as-read, assignment, resolve/reopen, contact notes/tags, the 24-hour reply rule and `POST /conversations/:id/template-messages` for template replies. Not yet: receiving/sending media in chat, internal (private) notes |
+| Users & Teams ✅ | Done: list, add user (admin sets the password), change role, deactivate/reactivate (signs them out), admin password reset, last-admin protection. Not yet: teams/groups, invitation emails, fine-grained permissions |
+| Profile, Settings ✅ | Done: edit own name, change password (ends all sessions), business name/category/time zone (`PATCH /tenants/me`). Not yet: notification and AI preferences, billing |
+| Dashboard, Analytics ✅ | Done: `GET /analytics/overview?range=today\|7d\|30d\|90d` (messages, delivery, conversations, first-reply time, contact growth, campaign funnel, per-day series in the business time zone) and CSV export. Not yet: per-account/campaign/agent filters, AI metrics |
 | Help & Support | Create support ticket → shared with admin Tickets (Phase 5) |
 
 ## Phase 3 — Developer platform ⬜

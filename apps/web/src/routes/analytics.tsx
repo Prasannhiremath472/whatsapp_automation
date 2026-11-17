@@ -1,2 +1,3 @@
-import { AnalyticsPage } from '@/components/genie/OverviewPages';
+import { AnalyticsPage } from "@/components/analytics/AnalyticsViews";
+
 export default AnalyticsPage;

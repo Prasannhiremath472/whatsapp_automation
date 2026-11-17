@@ -1,2 +1,3 @@
-import { DashboardPage } from '@/components/genie/OverviewPages';
+import { DashboardPage } from "@/components/analytics/AnalyticsViews";
+
 export default DashboardPage;

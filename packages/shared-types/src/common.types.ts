@@ -52,3 +52,48 @@ export function normalizeWaId(input: string, defaultCountryCode?: string): strin
 export function formatWaId(waId: string): string {
   return `+${waId}`;
 }
+
+export const ANALYTICS_RANGES = ["today", "7d", "30d", "90d"] as const;
+export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
+
+/** GET /analytics/overview: everything the Dashboard and Analytics screens show. */
+export interface AnalyticsOverview {
+  range: AnalyticsRange;
+  /** First instant of the period, in the business's time zone. */
+  since: string;
+  messages: {
+    /** Messages the business sent (not counting ones that failed). */
+    sent: number;
+    delivered: number;
+    read: number;
+    failed: number;
+    inbound: number;
+    previousSent: number;
+    previousInbound: number;
+  };
+  conversations: {
+    started: number;
+    previousStarted: number;
+    open: number;
+    unread: number;
+    /** Average time from a customer's first message to a team member's first reply. */
+    avgFirstResponseSeconds: number | null;
+  };
+  contacts: { total: number; new: number; previousNew: number; optedOut: number };
+  daily: { date: string; inbound: number; outbound: number; newContacts: number }[];
+  campaigns: {
+    total: number;
+    running: number;
+    recent: {
+      id: string;
+      name: string;
+      status: string;
+      total: number;
+      sent: number;
+      delivered: number;
+      read: number;
+      failed: number;
+      createdAt: string;
+    }[];
+  };
+}
