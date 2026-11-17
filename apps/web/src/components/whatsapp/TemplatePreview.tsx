@@ -20,7 +20,10 @@ export function TemplatePreview({ template, sample = true }: { template: WaTempl
   return (
     <div className="rounded-xl bg-chat-bg p-4">
       <div className="ml-auto w-fit max-w-[85%] overflow-hidden rounded-lg bg-bubble-out shadow-sm">
-        {["image", "video", "document"].includes(template.headerType) && (
+        {template.headerType === "image" && template.headerMediaUrl && (
+          <img src={template.headerMediaUrl} alt="Header" className="max-h-48 w-full object-cover" />
+        )}
+        {["image", "video", "document"].includes(template.headerType) && !(template.headerType === "image" && template.headerMediaUrl) && (
           <div className="flex h-32 items-center justify-center bg-wa-deep/10">
             <div className="text-center"><ImageIcon className="mx-auto h-8 w-8 text-wa-deep/40" /><p className="mt-2 text-xs text-muted-foreground">{template.headerType} placeholder</p></div>
           </div>

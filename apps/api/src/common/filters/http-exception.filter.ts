@@ -9,6 +9,11 @@ import {
 import { Request, Response } from "express";
 import { ZodError } from "zod";
 
+function isClientHttpError(e: unknown): e is { status: number } {
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status === "number" && status >= 400 && status < 500 && (e as { expose?: unknown }).expose === true;
+}
+
 /**
  * Global exception filter producing a consistent JSON error shape:
  * { statusCode, message, error, path, timestamp, issues? }
@@ -47,6 +52,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
         error = (r.error as string) ?? exception.name;
         if (Array.isArray(r.issues)) issues = r.issues as { path: string; message: string }[];
       }
+    } else if (isClientHttpError(exception)) {
+      // Errors raised by Express body parsers (e.g. an upload over the size limit).
+      statusCode = exception.status;
+      message = exception.status === 413 ? "The file is too large" : "Invalid request body";
+      error = exception.status === 413 ? "Payload Too Large" : "Bad Request";
     } else if (exception instanceof Error) {
       // Never leak internals for unexpected errors.
       this.logger.error(exception.message, exception.stack);

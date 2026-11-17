@@ -42,6 +42,7 @@ model Tenant {
   conversations        Conversation[]
   messages             Message[]
   messageTemplates     MessageTemplate[]
+  mediaAssets          MediaAsset[]
   tags                 Tag[]
   broadcastCampaigns   BroadcastCampaign[]
   botSessions          BotSession[]
@@ -334,6 +335,9 @@ model MessageTemplate {
   language        String             @default("en")
   headerType      TemplateHeaderType @default(none)
   headerText      String?
+  // Public https link of the sample/default image for image-header templates
+  // (an uploaded MediaAsset served from /files/:id, or any external link).
+  headerMediaUrl  String?            @db.VarChar(1000)
   body            String             @db.Text
   footer          String?
   // Array<{ type: 'quick_reply' | 'cta_url' | 'cta_phone', label, value? }>
@@ -647,4 +651,21 @@ model Order {
   @@index([tenantId, status])
   @@index([tenantId, contactId])
   @@map("orders")
+}
+
+// Images uploaded by a business for template headers. Stored in MySQL (the
+// hosting plan has no persistent file storage that survives a redeploy) and
+// served publicly by their unguessable id so Meta can download them.
+model MediaAsset {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  filename  String
+  mimeType  String
+  sizeBytes Int
+  data      Bytes    @db.LongBlob
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@map("media_assets")
 }

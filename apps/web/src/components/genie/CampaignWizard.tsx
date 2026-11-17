@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, Megaphone } from "lucide-react";
 import { toast } from "sonner";
 import { CONTACT_VARIABLE_FIELDS, variableCount } from "@whatsapp-crm/shared-types";
+import { ImageUploadField } from "@/components/whatsapp/ImageUploadField";
 import { TemplatePreview } from "@/components/whatsapp/TemplatePreview";
 import { useAudiencePreview, useCampaignAction, useSaveCampaign } from "@/api/campaigns";
 import { useContactTags } from "@/api/contacts";
@@ -67,6 +68,13 @@ export function CampaignWizard({ initial, onClose }: Props) {
   const bodyCount = template ? variableCount(template.body) : 0;
   const headerCount = headerVariableCount(template);
   const needsMedia = !!template && ["image", "video", "document"].includes(template.headerType);
+
+  // A template that already carries an image gives the campaign that image to start from.
+  useEffect(() => {
+    const url = template?.headerMediaUrl;
+    if (!url) return;
+    setDraft((d) => (d && d.templateId === template.id && !d.headerMediaUrl ? { ...d, headerMediaUrl: url } : d));
+  }, [template]);
 
   // Keep the variable forms in step with the chosen template.
   useEffect(() => {
@@ -306,12 +314,20 @@ export function CampaignWizard({ initial, onClose }: Props) {
               <p className="text-xs text-muted-foreground">
                 WhatsApp only lets businesses start conversations with templates Meta has approved.
               </p>
-              {needsMedia && template && (
+              {needsMedia && template && template.headerType === "image" && (
+                <ImageUploadField
+                  label="Header image"
+                  value={draft.headerMediaUrl}
+                  onChange={(v) => set("headerMediaUrl", v)}
+                  hint="Every contact receives this picture in the message header."
+                />
+              )}
+              {needsMedia && template && template.headerType !== "image" && (
                 <Field
                   label={`${template.headerType[0]!.toUpperCase()}${template.headerType.slice(1)} URL for the header (https)`}
                   value={draft.headerMediaUrl}
                   onChange={(v) => set("headerMediaUrl", v)}
-                  placeholder="https://cdn.example.com/offer.jpg"
+                  placeholder="https://cdn.example.com/offer.pdf"
                   required
                 />
               )}

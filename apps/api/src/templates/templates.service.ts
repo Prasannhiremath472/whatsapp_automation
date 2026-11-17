@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { BadGatewayException, BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, type MessageTemplate, type TemplateStatus } from '@prisma/client';
 import {
@@ -10,6 +11,7 @@ import {
   type TemplateDto,
 } from '@whatsapp-crm/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
+import { MediaService, sniffImageType } from '../media/media.service';
 import {
   WHATSAPP_PROVIDER,
   WhatsAppSendError,
@@ -24,6 +26,7 @@ export function toTemplateDto(t: MessageTemplate): TemplateDto {
     language: t.language,
     headerType: t.headerType,
     headerText: t.headerText,
+    headerMediaUrl: t.headerMediaUrl,
     body: t.body,
     footer: t.footer,
     buttons: (t.buttons as unknown as TemplateButton[]) ?? [],
@@ -61,6 +64,7 @@ export class TemplatesService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly media: MediaService,
     @Inject(WHATSAPP_PROVIDER) private readonly provider: WhatsAppProvider,
   ) {}
 
@@ -100,6 +104,7 @@ export class TemplatesService {
         language: input.language,
         headerType: input.headerType,
         headerText: input.headerType === 'text' ? (input.headerText ?? null) : null,
+        headerMediaUrl: input.headerType === 'image' ? (input.headerMediaUrl ?? null) : null,
         body: input.body,
         footer: input.footer || null,
         buttons: input.buttons as unknown as Prisma.InputJsonValue,
@@ -130,6 +135,7 @@ export class TemplatesService {
         language: input.language,
         headerType: input.headerType,
         headerText: input.headerType === 'text' ? (input.headerText ?? null) : null,
+        headerMediaUrl: input.headerType === 'image' ? (input.headerMediaUrl ?? null) : null,
         body: input.body,
         footer: input.footer || null,
         buttons: input.buttons as unknown as Prisma.InputJsonValue,
@@ -160,6 +166,8 @@ export class TemplatesService {
       throw new BadRequestException('Connect a WhatsApp account before submitting templates');
     }
 
+    const headerSample = template.headerType === 'image' ? await this.loadHeaderSample(tenantId, template.headerMediaUrl) : undefined;
+
     try {
       const result = await this.provider.submitTemplate(connection, {
         name: template.name,
@@ -167,6 +175,7 @@ export class TemplatesService {
         category: metaCategoryFor(template.category),
         headerType: template.headerType,
         headerText: template.headerText,
+        ...(headerSample ? { headerSample } : {}),
         body: template.body,
         footer: template.footer,
         buttons: template.buttons as unknown as TemplateButton[],
@@ -187,6 +196,34 @@ export class TemplatesService {
         throw new BadGatewayException(err.message);
       }
       throw err;
+    }
+  }
+
+  /** Meta needs the actual image as the template's sample: our own upload, or a download of an external link. */
+  private async loadHeaderSample(
+    tenantId: string,
+    url: string | null,
+  ): Promise<{ data: Buffer; mimeType: 'image/jpeg' | 'image/png'; filename: string }> {
+    if (!url) {
+      throw new BadRequestException('Upload a sample image for the header before submitting this template');
+    }
+    const own = await this.media.findOwnedByUrl(tenantId, url);
+    if (own) {
+      return { data: Buffer.from(own.data), mimeType: own.mimeType as 'image/jpeg' | 'image/png', filename: own.filename };
+    }
+    try {
+      const res = await axios.get<ArrayBuffer>(url, {
+        responseType: 'arraybuffer',
+        timeout: 15_000,
+        maxContentLength: 5 * 1024 * 1024,
+        maxRedirects: 3,
+      });
+      const data = Buffer.from(res.data);
+      const mimeType = sniffImageType(data);
+      if (!mimeType) throw new Error('not a JPG or PNG image');
+      return { data, mimeType, filename: `header.${mimeType === 'image/png' ? 'png' : 'jpg'}` };
+    } catch {
+      throw new BadRequestException('Could not download the header image. Upload it again (JPG or PNG, up to 5 MB).');
     }
   }
 

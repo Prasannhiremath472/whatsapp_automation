@@ -14,6 +14,7 @@ import { InboxModule } from './inbox/inbox.module';
 import { AutomationModule } from './automation/automation.module';
 import { BroadcastModule } from './broadcast/broadcast.module';
 import { ContactsModule } from './contacts/contacts.module';
+import { MediaModule } from './media/media.module';
 import { TemplatesModule } from './templates/templates.module';
 import { CommerceBotModule } from './commerce-bot/commerce-bot.module';
 import { DevModule } from './dev/dev.module';
@@ -39,6 +40,7 @@ const devOnlyImports = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     AutomationModule,
     ContactsModule,
     TemplatesModule,
+    MediaModule,
     BroadcastModule,
     CommerceBotModule,
     WebhookModule,

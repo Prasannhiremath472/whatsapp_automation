@@ -67,6 +67,13 @@ export const SaveTemplateRequestSchema = z
     language: z.string().regex(/^[a-z]{2,3}(_[A-Z]{2})?$/, "Use a language code such as en, hi or en_US"),
     headerType: TemplateHeaderTypeSchema.default("none"),
     headerText: z.string().trim().max(60).optional(),
+    /** Sample/default image for an image header: a public https link (an uploaded file or external). */
+    headerMediaUrl: z
+      .string()
+      .trim()
+      .max(1000)
+      .regex(/^https:\/\/\S+$/, "Use a public https:// link")
+      .optional(),
     body: z.string().trim().min(1).max(1024),
     footer: z.string().trim().max(60).optional(),
     buttons: z.array(TemplateButtonSchema).max(10).default([]),
@@ -107,6 +114,7 @@ export interface TemplateDto {
   language: string;
   headerType: TemplateHeaderType;
   headerText: string | null;
+  headerMediaUrl: string | null;
   body: string;
   footer: string | null;
   buttons: TemplateButton[];
@@ -118,4 +126,18 @@ export interface TemplateDto {
   headerVariableCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Images accepted for WhatsApp headers (Meta supports JPEG and PNG, up to 5 MB). */
+export const MEDIA_IMAGE_TYPES = ["image/jpeg", "image/png"] as const;
+export const MEDIA_MAX_BYTES = 5 * 1024 * 1024;
+
+/** Response of POST /media. */
+export interface MediaAssetDto {
+  id: string;
+  /** Public https link Meta (and the browser) can open. */
+  url: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
 }

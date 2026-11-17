@@ -20,6 +20,7 @@ export function toWaTemplate(t: TemplateDto): WaTemplate {
     language: languageLabel(t.language),
     headerType: t.headerType,
     ...(t.headerText ? { headerText: t.headerText } : {}),
+    ...(t.headerMediaUrl ? { headerMediaUrl: t.headerMediaUrl } : {}),
     body: t.body,
     ...(t.footer ? { footer: t.footer } : {}),
     buttons: t.buttons.map((b) => ({
@@ -42,6 +43,9 @@ export function toSaveRequest(
     language: languageCode(draft.language),
     headerType: draft.headerType,
     ...(draft.headerType === "text" && draft.headerText ? { headerText: draft.headerText } : {}),
+    ...(draft.headerType === "image" && draft.headerMediaUrl?.trim()
+      ? { headerMediaUrl: draft.headerMediaUrl.trim() }
+      : {}),
     body: draft.body,
     ...(draft.footer ? { footer: draft.footer } : {}),
     buttons: draft.buttons.map((b) => ({

@@ -155,9 +155,9 @@ export class WhatsAppCloudApiProvider implements WhatsAppProvider {
     if (!connection.wabaId) {
       throw new WhatsAppSendError('This WhatsApp account has no WABA id configured', undefined, undefined, false);
     }
-    if (t.headerType === 'image' || t.headerType === 'video' || t.headerType === 'document') {
+    if (t.headerType === 'video' || t.headerType === 'document') {
       throw new WhatsAppSendError(
-        'Templates with an image, video or document header must be created in WhatsApp Manager (Meta requires an uploaded sample). Create it there, then use "Sync from Meta".',
+        'Templates with a video or document header must be created in WhatsApp Manager (Meta requires an uploaded sample). Create it there, then use "Sync from Meta".',
         undefined,
         undefined,
         false,
@@ -172,6 +172,13 @@ export class WhatsAppCloudApiProvider implements WhatsAppProvider {
         text: t.headerText,
         ...(variableCount(t.headerText) > 0 ? { example: { header_text: ['Sample'] } } : {}),
       });
+    }
+    if (t.headerType === 'image') {
+      if (!t.headerSample) {
+        throw new WhatsAppSendError('An image header needs a sample image', undefined, undefined, false);
+      }
+      const handle = await this.uploadSample(connection, t.headerSample);
+      components.push({ type: 'HEADER', format: 'IMAGE', example: { header_handle: [handle] } });
     }
     const bodyVars = variableCount(t.body);
     components.push({
@@ -200,6 +207,38 @@ export class WhatsAppCloudApiProvider implements WhatsAppProvider {
     );
     if (!data?.id) throw new WhatsAppSendError('Meta did not return a template id', undefined, undefined, false);
     return { metaTemplateId: data.id, status: data.status === 'APPROVED' ? ('approved' as const) : ('pending' as const) };
+  }
+
+  /**
+   * Meta's Resumable Upload API: turns the sample image into the `header_handle`
+   * a template submission needs. Requires the Meta app id (META_APP_ID).
+   */
+  private async uploadSample(
+    connection: WhatsappConnection,
+    sample: NonNullable<TemplateSubmission['headerSample']>,
+  ): Promise<string> {
+    const appId = this.config.get<string>('META_APP_ID');
+    if (!appId) {
+      throw new WhatsAppSendError('META_APP_ID is not configured on the server, so image templates cannot be submitted', undefined, undefined, false);
+    }
+    const token = this.accessTokenFor(connection);
+    try {
+      const session = await axios.post<{ id?: string }>(this.graphUrl(`${appId}/uploads`), null, {
+        params: { file_length: sample.data.length, file_type: sample.mimeType, file_name: sample.filename },
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 20_000,
+      });
+      if (!session.data?.id) throw new WhatsAppSendError('Meta did not open an upload session', undefined, undefined, false);
+      const uploaded = await axios.post<{ h?: string }>(this.graphUrl(session.data.id), sample.data, {
+        headers: { Authorization: `OAuth ${token}`, file_offset: '0', 'Content-Type': sample.mimeType },
+        maxBodyLength: Infinity,
+        timeout: 60_000,
+      });
+      if (!uploaded.data?.h) throw new WhatsAppSendError('Meta did not return an image handle', undefined, undefined, false);
+      return uploaded.data.h;
+    } catch (err) {
+      throw this.toSendError(err);
+    }
   }
 
   async fetchTemplates(connection: WhatsappConnection): Promise<RemoteTemplate[]> {

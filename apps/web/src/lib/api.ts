@@ -118,6 +118,8 @@ async function parseError(res: Response): Promise<ApiError> {
 interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  /** Send a file as the raw request body (its own MIME type becomes the Content-Type). */
+  rawBody?: Blob;
   query?: Query;
   signal?: AbortSignal;
   /** Skip auth header / refresh handling (login, refresh). */
@@ -126,7 +128,8 @@ interface RequestOptions {
 
 async function send(path: string, opts: RequestOptions, retried = false): Promise<Response> {
   const headers: Record<string, string> = {};
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  if (opts.rawBody) headers["Content-Type"] = opts.rawBody.type;
+  else if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   const tokens = opts.anonymous ? null : tokenStore.get();
   if (tokens) headers["Authorization"] = `Bearer ${tokens.accessToken}`;
 
@@ -135,7 +138,7 @@ async function send(path: string, opts: RequestOptions, retried = false): Promis
     res = await fetch(buildUrl(path, opts.query), {
       method: opts.method ?? "GET",
       headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : null,
+      body: opts.rawBody ?? (opts.body !== undefined ? JSON.stringify(opts.body) : null),
       signal: opts.signal ?? null,
     });
   } catch (err) {

@@ -30,6 +30,8 @@ export interface TemplateSubmission {
   category: 'MARKETING' | 'UTILITY';
   headerType: 'none' | 'text' | 'image' | 'video' | 'document';
   headerText?: string | null;
+  /** The actual image Meta needs as the sample of an image header. */
+  headerSample?: { data: Buffer; mimeType: 'image/jpeg' | 'image/png'; filename: string };
   body: string;
   footer?: string | null;
   buttons: { type: 'quick_reply' | 'cta_url' | 'cta_phone'; label: string; value?: string }[];

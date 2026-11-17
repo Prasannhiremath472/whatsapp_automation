@@ -13,6 +13,8 @@ export type WaTemplate = {
   language: string;
   headerType: "none" | "text" | "image" | "video" | "document";
   headerText?: string;
+  /** Public https link of the header image (uploaded or external). */
+  headerMediaUrl?: string;
   body: string;
   footer?: string;
   buttons: TemplateButton[];

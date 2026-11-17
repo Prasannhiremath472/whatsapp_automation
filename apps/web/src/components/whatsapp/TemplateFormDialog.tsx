@@ -26,6 +26,7 @@ import {
   type TemplateButton,
   type WaTemplate,
 } from "./templates-data";
+import { ImageUploadField } from "./ImageUploadField";
 import { TemplatePreview } from "./TemplatePreview";
 
 type Draft = Omit<WaTemplate, "id" | "status" | "updatedAt">;
@@ -158,7 +159,7 @@ export function TemplateFormDialog({
                   <SelectContent>
                     <SelectItem value="none">None</SelectItem>
                     <SelectItem value="text">Text</SelectItem>
-                    <SelectItem value="image">Image placeholder</SelectItem>
+                    <SelectItem value="image">Image</SelectItem>
                     <SelectItem value="video">Video placeholder</SelectItem>
                     <SelectItem value="document">Document placeholder</SelectItem>
                   </SelectContent>
@@ -176,6 +177,15 @@ export function TemplateFormDialog({
                   onChange={(e) => set("headerText", e.target.value)}
                 />
               </div>
+            )}
+
+            {draft.headerType === "image" && (
+              <ImageUploadField
+                label="Header image"
+                value={draft.headerMediaUrl ?? ""}
+                onChange={(url) => set("headerMediaUrl", url)}
+                hint="Meta reviews this image together with your template. Campaigns can still use a different picture."
+              />
             )}
 
             <div className="space-y-1.5">
