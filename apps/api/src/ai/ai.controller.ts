@@ -3,7 +3,7 @@ import {
   SaveAiAgentRequestSchema,
   SaveKnowledgeRequestSchema,
   SetAiAgentStatusRequestSchema,
-  SetAnthropicKeyRequestSchema,
+  SetAiKeyRequestSchema,
   TestAiAgentRequestSchema,
   type AiAgentDto,
   type AiKnowledgeDto,
@@ -11,6 +11,7 @@ import {
   type AiTestReply,
   type SaveAiAgentRequest,
   type SaveKnowledgeRequest,
+  type SetAiKeyRequest,
 } from '@whatsapp-crm/shared-types';
 import { Roles } from '../common/decorators/roles.decorator';
 import { TenantId } from '../common/decorators/tenant-id.decorator';
@@ -31,9 +32,9 @@ export class AiController {
   @Put('settings/key')
   setKey(
     @TenantId() tenantId: string,
-    @Body(new ZodValidationPipe(SetAnthropicKeyRequestSchema)) body: { apiKey: string },
+    @Body(new ZodValidationPipe(SetAiKeyRequestSchema)) body: SetAiKeyRequest,
   ): Promise<AiSettingsDto> {
-    return this.ai.setKey(tenantId, body.apiKey);
+    return this.ai.setKey(tenantId, body.provider, body.apiKey);
   }
 
   @Delete('settings/key')

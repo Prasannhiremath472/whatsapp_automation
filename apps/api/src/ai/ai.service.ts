@@ -2,8 +2,11 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { ConfigService } from '@nestjs/config';
 import type { AiAgent, AiKnowledge, Conversation } from '@prisma/client';
 import {
+  AI_PROVIDERS,
   describeMessage,
+  providerOf,
   type AiAgentDto,
+  type AiProvider,
   type AiKnowledgeDto,
   type AiSettingsDto,
   type AiTestReply,
@@ -15,6 +18,7 @@ import { InboxService } from '../inbox/inbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { HANDOFF_TOOL, buildSystemPrompt, toClaudeMessages } from './ai-prompt';
 import { ClaudeClient, ClaudeError, type ClaudeResult } from './claude.client';
+import { OpenAiClient } from './openai.client';
 
 /** How many recent messages Claude sees. */
 const HISTORY_LIMIT = 20;
@@ -35,6 +39,7 @@ export class AiService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly claude: ClaudeClient,
+    private readonly openai: OpenAiClient,
     private readonly inbox: InboxService,
   ) {}
 
@@ -43,6 +48,7 @@ export class AiService {
   async getSettings(tenantId: string): Promise<AiSettingsDto> {
     const s = await this.prisma.aiSettings.findUnique({ where: { tenantId } });
     return {
+      provider: (s?.provider as AiProvider | undefined) ?? 'anthropic',
       hasKey: !!s?.anthropicKeyCipher,
       keyLast4: s?.keyLast4 ?? null,
       lastError: s?.lastError ?? null,
@@ -50,16 +56,24 @@ export class AiService {
     };
   }
 
-  async setKey(tenantId: string, apiKey: string): Promise<AiSettingsDto> {
+  /** One key per business, for one provider. Switching provider moves the agents to that provider's default model and pauses them. */
+  async setKey(tenantId: string, provider: AiProvider, apiKey: string): Promise<AiSettingsDto> {
     // Prove the key works before saving it.
-    await this.ping(apiKey);
+    await this.verifyKey(provider, apiKey);
+    const previous = await this.prisma.aiSettings.findUnique({ where: { tenantId } });
     const data = {
+      provider,
       anthropicKeyCipher: encryptSecret(apiKey, this.config.get<string>('ENCRYPTION_KEY')),
       keyLast4: apiKey.slice(-4),
       lastError: null,
       lastErrorAt: null,
     };
     await this.prisma.aiSettings.upsert({ where: { tenantId }, update: data, create: { tenantId, ...data } });
+
+    if (previous?.anthropicKeyCipher && previous.provider !== provider) {
+      const defaultModel = AI_PROVIDERS.find((p) => p.id === provider)!.defaultModel;
+      await this.prisma.aiAgent.updateMany({ where: { tenantId }, data: { model: defaultModel, status: 'paused' } });
+    }
     return this.getSettings(tenantId);
   }
 
@@ -73,28 +87,36 @@ export class AiService {
     return this.getSettings(tenantId);
   }
 
-  private async ping(apiKey: string): Promise<void> {
+  private async verifyKey(provider: AiProvider, apiKey: string): Promise<void> {
     try {
-      await this.claude.complete({
-        apiKey,
-        model: 'claude-haiku-5-5',
-        system: 'Reply with the single word OK.',
-        messages: [{ role: 'user', content: 'ping' }],
-        maxTokens: 8,
-      });
+      if (provider === 'openai') {
+        await this.openai.verifyKey(apiKey);
+      } else {
+        await this.claude.complete({
+          apiKey,
+          model: 'claude-haiku-5-5',
+          system: 'Reply with the single word OK.',
+          messages: [{ role: 'user', content: 'ping' }],
+          maxTokens: 8,
+        });
+      }
     } catch (err) {
       const e = err as ClaudeError;
+      const company = provider === 'openai' ? 'OpenAI' : 'Anthropic';
       throw new BadRequestException(
-        e.authFailure ? 'Anthropic rejected this API key. Check that you copied the whole key.' : `Could not reach Anthropic: ${e.message}`,
+        e.authFailure ? `${company} rejected this API key. Check that you copied the whole key.` : `Could not reach ${company}: ${e.message}`,
       );
     }
   }
 
-  private async keyFor(tenantId: string): Promise<string | null> {
+  private async keyFor(tenantId: string): Promise<{ apiKey: string; provider: AiProvider } | null> {
     const s = await this.prisma.aiSettings.findUnique({ where: { tenantId } });
     if (!s?.anthropicKeyCipher) return null;
     try {
-      return decryptSecret(s.anthropicKeyCipher, this.config.get<string>('ENCRYPTION_KEY'));
+      return {
+        apiKey: decryptSecret(s.anthropicKeyCipher, this.config.get<string>('ENCRYPTION_KEY')),
+        provider: s.provider as AiProvider,
+      };
     } catch {
       return null;
     }
@@ -102,6 +124,20 @@ export class AiService {
 
   private async recordError(tenantId: string, message: string): Promise<void> {
     await this.prisma.aiSettings.updateMany({ where: { tenantId }, data: { lastError: message.slice(0, 500), lastErrorAt: new Date() } });
+  }
+
+  /** The model must belong to the provider whose key is saved (Claude models with Anthropic, everything else with OpenAI). */
+  private async resolveModel(tenantId: string, requested: string | undefined): Promise<string> {
+    const provider = (await this.getSettings(tenantId)).provider;
+    const model = requested ?? AI_PROVIDERS.find((p) => p.id === provider)!.defaultModel;
+    if (providerOf(model) !== provider) {
+      throw new BadRequestException(
+        provider === 'anthropic'
+          ? 'Your connected provider is Anthropic, so choose a Claude model (or connect an OpenAI key instead).'
+          : 'Your connected provider is OpenAI, so choose a GPT model (or connect an Anthropic key instead).',
+      );
+    }
+    return model;
   }
 
   // ----- Agents ------------------------------------------------------------
@@ -148,18 +184,20 @@ export class AiService {
   }
 
   async createAgent(tenantId: string, input: SaveAiAgentRequest): Promise<AiAgentDto> {
+    const model = await this.resolveModel(tenantId, input.model);
     const created = await this.prisma.aiAgent.create({
-      data: { tenantId, name: input.name, instructions: input.instructions, model: input.model, handoverMessage: input.handoverMessage, status: 'paused' },
+      data: { tenantId, name: input.name, instructions: input.instructions, model, handoverMessage: input.handoverMessage, status: 'paused' },
       include: { knowledge: true },
     });
     return this.toDto(created);
   }
 
   async updateAgent(tenantId: string, id: string, input: SaveAiAgentRequest): Promise<AiAgentDto> {
-    await this.findOwned(tenantId, id);
+    const current = await this.findOwned(tenantId, id);
+    const model = await this.resolveModel(tenantId, input.model ?? current.model);
     const updated = await this.prisma.aiAgent.update({
       where: { id },
-      data: { name: input.name, instructions: input.instructions, model: input.model, handoverMessage: input.handoverMessage },
+      data: { name: input.name, instructions: input.instructions, model, handoverMessage: input.handoverMessage },
       include: { knowledge: { orderBy: { createdAt: 'asc' } } },
     });
     return this.toDto(updated);
@@ -170,7 +208,7 @@ export class AiService {
     await this.findOwned(tenantId, id);
     if (status === 'active') {
       if (!(await this.keyFor(tenantId))) {
-        throw new ConflictException('Add your Anthropic API key first, then turn the agent on');
+        throw new ConflictException('Add your AI API key (Anthropic or OpenAI) first, then turn the agent on');
       }
       await this.prisma.aiAgent.updateMany({ where: { tenantId, status: 'active', NOT: { id } }, data: { status: 'paused' } });
     }
@@ -209,12 +247,13 @@ export class AiService {
   private async ask(
     tenantId: string,
     agent: AiAgent & { knowledge: AiKnowledge[] },
-    apiKey: string,
+    key: { apiKey: string; provider: AiProvider },
     messages: ReturnType<typeof toClaudeMessages>,
   ): Promise<ClaudeResult> {
     const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { name: true } });
-    return this.claude.complete({
-      apiKey,
+    const client = key.provider === 'openai' ? this.openai : this.claude;
+    return client.complete({
+      apiKey: key.apiKey,
       model: agent.model,
       system: buildSystemPrompt({ agentName: agent.name, businessName: tenant.name, instructions: agent.instructions, knowledge: agent.knowledge }),
       messages,
@@ -231,15 +270,15 @@ export class AiService {
     });
   }
 
-  /** The test chat in the UI: asks Claude with the agent's real settings but sends nothing to WhatsApp. */
+  /** The test chat in the UI: asks the AI with the agent's real settings but sends nothing to WhatsApp. */
   async testAgent(tenantId: string, agentId: string, messages: { role: 'user' | 'assistant'; text: string }[]): Promise<AiTestReply> {
     const agent = await this.findOwned(tenantId, agentId);
-    const apiKey = await this.keyFor(tenantId);
-    if (!apiKey) throw new BadRequestException('Add your Anthropic API key first');
+    const key = await this.keyFor(tenantId);
+    if (!key) throw new BadRequestException('Add your AI API key (Anthropic or OpenAI) first');
     const history = toClaudeMessages(messages.map((m) => ({ direction: m.role === 'user' ? 'inbound' : 'outbound', text: m.text })));
     if (history.length === 0) throw new BadRequestException('Send a message to test the agent');
     try {
-      const result = await this.ask(tenantId, agent, apiKey, history);
+      const result = await this.ask(tenantId, agent, key, history);
       await this.bumpUsage(tenantId, agent.id, { requests: 1, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
       const handedOver = result.toolUse === 'handoff_to_human';
       return { text: handedOver ? agent.handoverMessage : result.text, handedOver, inputTokens: result.inputTokens, outputTokens: result.outputTokens };
@@ -261,8 +300,8 @@ export class AiService {
       include: { knowledge: { orderBy: { createdAt: 'asc' } } },
     });
     if (!agent) return false;
-    const apiKey = await this.keyFor(tenantId);
-    if (!apiKey) return false;
+    const key = await this.keyFor(tenantId);
+    if (!key) return false;
 
     const recentBot = await this.prisma.message.count({
       where: { tenantId, conversationId: conversation.id, direction: 'outbound', senderType: 'bot', createdAt: { gte: new Date(Date.now() - 3_600_000) } },
@@ -284,7 +323,7 @@ export class AiService {
     if (history.length === 0) return false;
 
     try {
-      const result = await this.ask(tenantId, agent, apiKey, history);
+      const result = await this.ask(tenantId, agent, key, history);
       await this.bumpUsage(tenantId, agent.id, { requests: 1, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
 
       if (result.toolUse === 'handoff_to_human' || !result.text) {

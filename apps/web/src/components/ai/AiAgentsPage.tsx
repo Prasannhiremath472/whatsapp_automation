@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Bot, Pencil, Plus, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { AI_MODELS, type AiAgentDto, type AiKnowledgeDto } from "@whatsapp-crm/shared-types";
+import { AI_PROVIDERS, type AiAgentDto, type AiKnowledgeDto, type AiProvider } from "@whatsapp-crm/shared-types";
 import {
   useAiAgents,
   useAiSettings,
   useDeleteAiAgent,
   useDeleteKnowledge,
-  useRemoveAnthropicKey,
+  useRemoveAiKey,
   useSaveAiAgent,
   useSaveKnowledge,
   useSetAiAgentStatus,
-  useSetAnthropicKey,
+  useSetAiKey,
   useTestAiAgent,
 } from "@/api/ai";
 import { Metrics, Modal, Status } from "@/components/genie/ui";
@@ -53,6 +53,7 @@ export function AiAgentsPage() {
   const selected = agents.find((a) => a.id === selectedId) ?? agents[0] ?? null;
 
   const hasKey = settings.data?.hasKey ?? false;
+  const provider: AiProvider = settings.data?.provider ?? "anthropic";
   const totals = agents.reduce(
     (t, a) => ({
       requests: t.requests + a.usage.requests,
@@ -66,7 +67,7 @@ export function AiAgentsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Genie AI Agents"
-        subtitle="Claude answers your customers on WhatsApp, and hands over to your team when needed."
+        subtitle="An AI assistant answers your customers on WhatsApp, and hands over to your team when needed."
         actions={
           isAdmin && (
             <Button onClick={() => setCreating(true)}>
@@ -86,7 +87,7 @@ export function AiAgentsPage() {
         ]}
       />
 
-      <KeySection hasKey={hasKey} last4={settings.data?.keyLast4 ?? null} lastError={settings.data?.lastError ?? null} isAdmin={isAdmin} />
+      <KeySection hasKey={hasKey} provider={provider} last4={settings.data?.keyLast4 ?? null} lastError={settings.data?.lastError ?? null} isAdmin={isAdmin} />
 
       {agentsQuery.isSuccess && agents.length === 0 && (
         <p className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
@@ -120,6 +121,7 @@ export function AiAgentsPage() {
           agent={selected}
           isAdmin={isAdmin}
           hasKey={hasKey}
+          provider={provider}
           onToggle={(on) =>
             setStatus.mutate(
               { id: selected.id, status: on ? "active" : "paused" },
@@ -133,35 +135,61 @@ export function AiAgentsPage() {
         />
       )}
 
-      <AgentEditor open={creating} agent={null} onClose={() => setCreating(false)} onSaved={(a) => setSelectedId(a.id)} />
+      <AgentEditor open={creating} agent={null} provider={provider} onClose={() => setCreating(false)} onSaved={(a) => setSelectedId(a.id)} />
     </div>
   );
 }
 
-function KeySection({ hasKey, last4, lastError, isAdmin }: { hasKey: boolean; last4: string | null; lastError: string | null; isAdmin: boolean }) {
-  const setKey = useSetAnthropicKey();
-  const removeKey = useRemoveAnthropicKey();
+function KeySection({
+  hasKey,
+  provider,
+  last4,
+  lastError,
+  isAdmin,
+}: {
+  hasKey: boolean;
+  provider: AiProvider;
+  last4: string | null;
+  lastError: string | null;
+  isAdmin: boolean;
+}) {
+  const setKey = useSetAiKey();
+  const removeKey = useRemoveAiKey();
+  const [choice, setChoice] = useState<AiProvider>(provider);
   const [value, setValue] = useState("");
+
+  useEffect(() => setChoice(provider), [provider]);
+  const info = AI_PROVIDERS.find((p) => p.id === choice)!;
+  const current = AI_PROVIDERS.find((p) => p.id === provider)!;
+  const switching = hasKey && choice !== provider;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    setKey.mutate(value.trim(), {
-      onSuccess: () => {
-        setValue("");
-        toast.success("API key saved");
+    if (switching && !confirm(`Switch to ${info.label}? Your agents will be paused and moved to ${info.defaultModel}.`)) return;
+    setKey.mutate(
+      { provider: choice, apiKey: value.trim() },
+      {
+        onSuccess: () => {
+          setValue("");
+          toast.success("API key saved");
+        },
+        onError: (err) => toast.error(errorText(err, "Could not save the key")),
       },
-      onError: (err) => toast.error(errorText(err, "Could not save the key")),
-    });
+    );
   };
 
   return (
     <Section
-      title="Your Anthropic API key"
-      description="Genie uses Claude through your own Anthropic account, so usage is billed to you by Anthropic. Create a key at console.anthropic.com. It is stored encrypted and never shown again."
+      title="Your AI provider key"
+      description="Genie uses your own account with Anthropic (Claude) or OpenAI (GPT), so usage is billed to you by that company. The key is checked, stored encrypted and never shown again."
     >
       <div className="flex flex-wrap items-center gap-3">
         <Status>{hasKey ? "Connected" : "Not connected"}</Status>
-        {hasKey && <span className="text-sm text-muted-foreground">Key ending in {last4}</span>}
+        {hasKey && (
+          <span className="text-sm text-muted-foreground">
+            {current.label} · key ending in {last4}
+          </span>
+        )}
         {hasKey && isAdmin && (
           <Button
             variant="outline"
@@ -182,26 +210,39 @@ function KeySection({ hasKey, last4, lastError, isAdmin }: { hasKey: boolean; la
         </p>
       )}
       {isAdmin && (
-        <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor="ai-key" className="sr-only">
-              Anthropic API key
-            </Label>
-            <Input id="ai-key" type="password" autoComplete="off" placeholder={hasKey ? "Paste a new key to replace it (sk-ant-…)" : "sk-ant-…"} value={value} onChange={(e) => setValue(e.target.value)} />
+        <form className="space-y-3" onSubmit={submit}>
+          <div className="grid gap-3 sm:grid-cols-[14rem_1fr_auto]">
+            <div className="space-y-1.5">
+              <Label htmlFor="ai-provider">Provider</Label>
+              <select id="ai-provider" className="h-9 w-full rounded-md border bg-card px-3 text-sm" value={choice} onChange={(e) => setChoice(e.target.value as AiProvider)}>
+                {AI_PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ai-key">API key</Label>
+              <Input id="ai-key" type="password" autoComplete="off" placeholder={hasKey && !switching ? `Paste a new key to replace it (${info.keyHint})` : info.keyHint} value={value} onChange={(e) => setValue(e.target.value)} />
+            </div>
+            <div className="flex items-end">
+              <Button type="submit" disabled={value.trim().length < 20 || setKey.isPending}>
+                {setKey.isPending ? "Checking the key…" : switching ? `Switch to ${choice === "openai" ? "OpenAI" : "Anthropic"}` : hasKey ? "Replace key" : "Save key"}
+              </Button>
+            </div>
           </div>
-          <Button type="submit" disabled={value.trim().length < 20 || setKey.isPending}>
-            {setKey.isPending ? "Checking the key…" : hasKey ? "Replace key" : "Save key"}
-          </Button>
+          <p className="text-xs text-muted-foreground">Get a key at {info.keyUrl}.{switching ? " Switching pauses your agents and moves them to the new provider's default model." : ""}</p>
         </form>
       )}
     </Section>
   );
 }
 
-function AgentPanel({ agent, isAdmin, hasKey, onToggle, toggling }: { agent: AiAgentDto; isAdmin: boolean; hasKey: boolean; onToggle: (on: boolean) => void; toggling: boolean }) {
+function AgentPanel({ agent, isAdmin, hasKey, provider, onToggle, toggling }: { agent: AiAgentDto; isAdmin: boolean; hasKey: boolean; provider: AiProvider; onToggle: (on: boolean) => void; toggling: boolean }) {
   const remove = useDeleteAiAgent();
   const [editing, setEditing] = useState(false);
-  const modelLabel = AI_MODELS.find((m) => m.id === agent.model)?.label ?? agent.model;
+  const modelLabel = AI_PROVIDERS.flatMap((p) => p.models).find((m) => m.id === agent.model)?.label ?? agent.model;
 
   return (
     <div className="space-y-5">
@@ -233,7 +274,7 @@ function AgentPanel({ agent, isAdmin, hasKey, onToggle, toggling }: { agent: AiA
             )}
           </div>
         </div>
-        {!hasKey && <p className="text-xs text-muted-foreground">Add your Anthropic API key above to turn an agent on.</p>}
+        {!hasKey && <p className="text-xs text-muted-foreground">Add your AI API key above to turn an agent on.</p>}
         <div>
           <p className="mb-1 text-xs font-semibold text-muted-foreground">INSTRUCTIONS</p>
           <p className="whitespace-pre-wrap text-sm">{agent.instructions}</p>
@@ -247,30 +288,34 @@ function AgentPanel({ agent, isAdmin, hasKey, onToggle, toggling }: { agent: AiA
         <KnowledgeSection agent={agent} isAdmin={isAdmin} />
         <TestChat agent={agent} hasKey={hasKey} />
       </div>
-      <AgentEditor open={editing} agent={agent} onClose={() => setEditing(false)} />
+      <AgentEditor open={editing} agent={agent} provider={provider} onClose={() => setEditing(false)} />
     </div>
   );
 }
 
-function AgentEditor({ open, agent, onClose, onSaved }: { open: boolean; agent: AiAgentDto | null; onClose: () => void; onSaved?: (a: AiAgentDto) => void }) {
+function AgentEditor({ open, agent, provider, onClose, onSaved }: { open: boolean; agent: AiAgentDto | null; provider: AiProvider; onClose: () => void; onSaved?: (a: AiAgentDto) => void }) {
   const save = useSaveAiAgent();
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [model, setModel] = useState<string>("claude-haiku-5-5");
+  const info = AI_PROVIDERS.find((p) => p.id === provider)!;
+  const [model, setModel] = useState<string>(info.defaultModel);
+  const [customModel, setCustomModel] = useState(false);
   const [handover, setHandover] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setName(agent?.name ?? "");
     setInstructions(agent?.instructions ?? "");
-    setModel(agent?.model ?? "claude-haiku-5-5");
+    const start = agent?.model ?? info.defaultModel;
+    setModel(start);
+    setCustomModel(!info.models.some((m) => m.id === start));
     setHandover(agent?.handoverMessage ?? "Thanks! A member of our team will take over from here shortly.");
-  }, [open, agent]);
+  }, [open, agent, info]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     save.mutate(
-      { id: agent?.id, body: { name: name.trim(), instructions: instructions.trim(), model: model as "claude-haiku-5-5", handoverMessage: handover.trim() } },
+      { id: agent?.id, body: { name: name.trim(), instructions: instructions.trim(), model: model.trim(), handoverMessage: handover.trim() } },
       {
         onSuccess: (saved) => {
           toast.success(agent ? "Agent saved" : "Agent created. Test it, then turn it on.");
@@ -291,14 +336,30 @@ function AgentEditor({ open, agent, onClose, onSaved }: { open: boolean; agent: 
             <Input id="ag-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} placeholder="e.g. Asha, our assistant" />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="ag-model">Model</Label>
-            <select id="ag-model" className="h-9 w-full rounded-md border bg-card px-3 text-sm" value={model} onChange={(e) => setModel(e.target.value)}>
-              {AI_MODELS.map((m) => (
+            <Label htmlFor="ag-model">Model ({info.label})</Label>
+            <select
+              id="ag-model"
+              className="h-9 w-full rounded-md border bg-card px-3 text-sm"
+              value={customModel ? "__custom" : model}
+              onChange={(e) => {
+                if (e.target.value === "__custom") {
+                  setCustomModel(true);
+                } else {
+                  setCustomModel(false);
+                  setModel(e.target.value);
+                }
+              }}
+            >
+              {info.models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
                 </option>
               ))}
+              <option value="__custom">Other model (type its name)</option>
             </select>
+            {customModel && (
+              <Input aria-label="Model name" className="mt-2" value={model} onChange={(e) => setModel(e.target.value)} placeholder={info.defaultModel} required maxLength={100} />
+            )}
           </div>
         </div>
         <div className="space-y-1.5">

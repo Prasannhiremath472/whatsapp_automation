@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { configureApp } from '../src/app.config';
 import { ClaudeClient, ClaudeError, type ClaudeResult } from '../src/ai/claude.client';
+import { OpenAiClient } from '../src/ai/openai.client';
 import { InboxService } from '../src/inbox/inbox.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -14,6 +15,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 jest.setTimeout(120_000);
 
 const GOOD_KEY = 'sk-ant-api03-' + 'a'.repeat(40);
+const GOOD_OPENAI_KEY = 'sk-proj-' + 'o'.repeat(40);
 
 describe('AI agents (e2e)', () => {
   let app: INestApplication;
@@ -39,6 +41,19 @@ describe('AI agents (e2e)', () => {
       if (params.apiKey !== GOOD_KEY) throw new ClaudeError('invalid x-api-key', 401, true);
       if (nextReply instanceof Error) throw nextReply;
       return nextReply;
+    },
+  };
+
+  /** The fake OpenAI: same idea, separate so we can tell which provider was asked. */
+  let nextOpenAiReply: ClaudeResult = { text: 'Hello from GPT.', toolUse: null, inputTokens: 80, outputTokens: 12 };
+  const askedOpenAi: { apiKey: string; model: string; system: string; messages: { role: string; content: string }[] }[] = [];
+  const fakeOpenAi = {
+    verifyKey: async (apiKey: string) => {
+      if (apiKey !== GOOD_OPENAI_KEY) throw new ClaudeError('Incorrect API key provided', 401, true);
+    },
+    complete: async (params: { apiKey: string; model: string; system: string; messages: { role: string; content: string }[] }) => {
+      askedOpenAi.push(params);
+      return nextOpenAiReply;
     },
   };
 
@@ -95,6 +110,8 @@ describe('AI agents (e2e)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClaudeClient)
       .useValue(fakeClaude)
+      .overrideProvider(OpenAiClient)
+      .useValue(fakeOpenAi)
       .compile();
     app = moduleFixture.createNestApplication();
     configureApp(app);
@@ -266,5 +283,61 @@ describe('AI agents (e2e)', () => {
     expect((await http().get(`${api}/ai/settings`).set(auth(adminA)).expect(200)).body.hasKey).toBe(false);
     expect((await http().get(`${api}/ai/agents`).set(auth(adminA)).expect(200)).body[0].status).toBe('paused');
     await http().patch(`${api}/ai/agents/${agentId}/status`).set(auth(adminA)).send({ status: 'active' }).expect(409);
+  });
+
+  describe('OpenAI as the provider', () => {
+    it('refuses an invalid key, an Anthropic key sent as OpenAI, and a model of the other company', async () => {
+      const bad = await http().put(`${api}/ai/settings/key`).set(auth(adminA)).send({ provider: 'openai', apiKey: 'sk-proj-' + 'b'.repeat(40) }).expect(400);
+      expect(bad.body.message).toMatch(/OpenAI rejected this API key/);
+      await http().put(`${api}/ai/settings/key`).set(auth(adminA)).send({ provider: 'openai', apiKey: GOOD_KEY }).expect(400); // an sk-ant- key is not an OpenAI key
+      await http().put(`${api}/ai/settings/key`).set(auth(adminA)).send({ provider: 'gemini', apiKey: GOOD_OPENAI_KEY }).expect(400);
+      expect((await http().get(`${api}/ai/settings`).set(auth(adminA)).expect(200)).body.hasKey).toBe(false);
+    });
+
+    it('moves existing agents to the new provider (default model, paused) when the key is switched', async () => {
+      await http().put(`${api}/ai/settings/key`).set(auth(adminA)).send({ apiKey: GOOD_KEY }).expect(200); // back on Anthropic
+      await http().patch(`${api}/ai/agents/${agentId}/status`).set(auth(adminA)).send({ status: 'active' }).expect(200);
+      const before = (await http().get(`${api}/ai/agents`).set(auth(adminA)).expect(200)).body[0];
+      expect(before).toMatchObject({ model: 'claude-haiku-5-5', status: 'active' });
+
+      const saved = await http().put(`${api}/ai/settings/key`).set(auth(adminA)).send({ provider: 'openai', apiKey: GOOD_OPENAI_KEY }).expect(200);
+      expect(saved.body).toMatchObject({ provider: 'openai', hasKey: true, keyLast4: GOOD_OPENAI_KEY.slice(-4) });
+      expect(JSON.stringify(saved.body)).not.toContain(GOOD_OPENAI_KEY);
+      const after = (await http().get(`${api}/ai/agents`).set(auth(adminA)).expect(200)).body[0];
+      expect(after).toMatchObject({ model: 'gpt-4o-mini', status: 'paused' });
+    });
+
+    it('only accepts models of the connected provider', async () => {
+      const wrong = await http().put(`${api}/ai/agents/${agentId}`).set(auth(adminA)).send({ ...agentBody, model: 'claude-sonnet-5-5' }).expect(400);
+      expect(wrong.body.message).toMatch(/choose a GPT model/);
+      const ok = await http().put(`${api}/ai/agents/${agentId}`).set(auth(adminA)).send({ ...agentBody, model: 'gpt-4.1-mini' }).expect(200);
+      expect(ok.body.model).toBe('gpt-4.1-mini');
+      const defaulted = await http().post(`${api}/ai/agents`).set(auth(adminA)).send({ name: 'Default model', instructions: 'Help customers of the shop politely.' }).expect(201);
+      expect(defaulted.body.model).toBe('gpt-4o-mini');
+      await http().delete(`${api}/ai/agents/${defaulted.body.id}`).set(auth(adminA)).expect(204);
+    });
+
+    it('answers with OpenAI (and not Claude) once connected', async () => {
+      await http().patch(`${api}/ai/agents/${agentId}/status`).set(auth(adminA)).send({ status: 'active' }).expect(200);
+      asked.length = 0;
+      askedOpenAi.length = 0;
+      nextOpenAiReply = { text: 'We open at ten, Monday to Saturday.', toolUse: null, inputTokens: 90, outputTokens: 14 };
+      await customerSays('919822220007', 'what time do you open?');
+      await eventually(async () => (await outbound('919822220007')).length > 0, 'OpenAI reply');
+      expect(((await outbound('919822220007'))[0]!.content as { body: string }).body).toBe('We open at ten, Monday to Saturday.');
+      expect(asked).toHaveLength(0);
+      expect(askedOpenAi).toHaveLength(1);
+      expect(askedOpenAi[0]).toMatchObject({ apiKey: GOOD_OPENAI_KEY, model: 'gpt-4.1-mini' });
+      expect(askedOpenAi[0]!.system).toContain('Mon-Sat 10 to 6.');
+    });
+
+    it('supports the test chat and the hand-over with OpenAI too', async () => {
+      nextOpenAiReply = { text: '', toolUse: 'handoff_to_human', inputTokens: 40, outputTokens: 5 };
+      const test = await http().post(`${api}/ai/agents/${agentId}/test`).set(auth(adminA)).send({ messages: [{ role: 'user', text: 'I want a person' }] }).expect(200);
+      expect(test.body).toMatchObject({ handedOver: true });
+      await customerSays('919822220008', 'speak to a human please');
+      await eventually(async () => (await conversationOf('919822220008')).status === 'pending', 'handed over');
+      expect(await conversationOf('919822220008')).toMatchObject({ status: 'pending', aiPaused: true });
+    });
   });
 });

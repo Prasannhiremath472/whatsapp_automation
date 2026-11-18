@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AiAgentDto,
+  AiProvider,
   AiKnowledgeDto,
   AiSettingsDto,
   AiTestReply,
@@ -25,15 +26,16 @@ function useRefreshAll() {
   return () => qc.invalidateQueries({ queryKey: ["ai"] });
 }
 
-export function useSetAnthropicKey() {
+export function useSetAiKey() {
   const refresh = useRefreshAll();
   return useMutation({
-    mutationFn: (apiKey: string) => api<AiSettingsDto>("/ai/settings/key", { method: "PUT", body: { apiKey } }),
+    mutationFn: (body: { provider: AiProvider; apiKey: string }) =>
+      api<AiSettingsDto>("/ai/settings/key", { method: "PUT", body }),
     onSuccess: refresh,
   });
 }
 
-export function useRemoveAnthropicKey() {
+export function useRemoveAiKey() {
   const refresh = useRefreshAll();
   return useMutation({
     mutationFn: () => api<AiSettingsDto>("/ai/settings/key", { method: "DELETE" }),

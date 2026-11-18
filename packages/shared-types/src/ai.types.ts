@@ -1,19 +1,72 @@
 import { z } from "zod";
 
-/** Claude models an agent can use (cheapest first). */
-export const AI_MODELS = [
-  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5: fastest and cheapest" },
-  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5: balanced" },
-  { id: "claude-opus-5-5", label: "Claude Opus 5.5: most capable" },
-] as const;
-export const AiModelSchema = z.enum(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]);
+export interface AiProviderInfo {
+  id: "anthropic" | "openai";
+  label: string;
+  keyHint: string;
+  keyUrl: string;
+  defaultModel: string;
+  models: readonly { id: string; label: string }[];
+}
+
+/** The AI companies a business can connect with its own API key. */
+export const AI_PROVIDERS: readonly AiProviderInfo[] = [
+  {
+    id: "anthropic",
+    label: "Anthropic (Claude)",
+    keyHint: "sk-ant-…",
+    keyUrl: "console.anthropic.com",
+    defaultModel: "claude-haiku-5-5",
+    models: [
+      { id: "claude-haiku-5-5", label: "Claude Haiku 5.5: fastest and cheapest" },
+      { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5: balanced" },
+      { id: "claude-opus-5-5", label: "Claude Opus 5.5: most capable" },
+    ],
+  },
+  {
+    id: "openai",
+    label: "OpenAI (GPT)",
+    keyHint: "sk-…",
+    keyUrl: "platform.openai.com/api-keys",
+    defaultModel: "gpt-4o-mini",
+    models: [
+      { id: "gpt-4o-mini", label: "GPT-4o mini: fast and cheap" },
+      { id: "gpt-4o", label: "GPT-4o: balanced" },
+      { id: "gpt-4.1-mini", label: "GPT-4.1 mini" },
+      { id: "gpt-4.1", label: "GPT-4.1: most capable" },
+    ],
+  },
+];
+export const AiProviderSchema = z.enum(["anthropic", "openai"]);
+export type AiProvider = z.infer<typeof AiProviderSchema>;
+
+export const providerOf = (model: string): AiProvider => (model.startsWith("claude-") ? "anthropic" : "openai");
+
+/** Any model name the provider accepts (the lists above are only suggestions). */
+export const AiModelSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{1,99}$/, "Enter a valid model name");
 
 /** DTO for PUT /ai/settings/key */
-export const SetAnthropicKeyRequestSchema = z.object({
-  apiKey: z.string().trim().min(20).max(300).regex(/^sk-ant-/, "An Anthropic key starts with sk-ant-"),
-});
+export const SetAiKeyRequestSchema = z
+  .object({
+    provider: AiProviderSchema.default("anthropic"),
+    apiKey: z.string().trim().min(20).max(300),
+  })
+  .superRefine((v, ctx) => {
+    if (v.provider === "anthropic" && !v.apiKey.startsWith("sk-ant-")) {
+      ctx.addIssue({ code: "custom", path: ["apiKey"], message: "An Anthropic key starts with sk-ant-" });
+    }
+    if (v.provider === "openai" && (!v.apiKey.startsWith("sk-") || v.apiKey.startsWith("sk-ant-"))) {
+      ctx.addIssue({ code: "custom", path: ["apiKey"], message: "An OpenAI key starts with sk-" });
+    }
+  });
+export type SetAiKeyRequest = z.infer<typeof SetAiKeyRequestSchema>;
 
 export interface AiSettingsDto {
+  /** The company whose key is saved (Anthropic when none is saved yet). */
+  provider: AiProvider;
   hasKey: boolean;
   keyLast4: string | null;
   lastError: string | null;
@@ -24,7 +77,8 @@ export interface AiSettingsDto {
 export const SaveAiAgentRequestSchema = z.object({
   name: z.string().trim().min(1).max(100),
   instructions: z.string().trim().min(10, "Describe what the agent should do").max(8000),
-  model: AiModelSchema.default("claude-haiku-5-5"),
+  /** Defaults to the connected provider's cheapest model. */
+  model: AiModelSchema.optional(),
   handoverMessage: z.string().trim().min(1).max(500).default("Thanks! A member of our team will take over from here shortly."),
 });
 export type SaveAiAgentRequest = z.infer<typeof SaveAiAgentRequestSchema>;

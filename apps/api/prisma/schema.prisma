@@ -750,6 +750,8 @@ model AiSettings {
   id                 String    @id @default(uuid())
   tenantId           String    @unique
   tenant             Tenant    @relation(fields: [tenantId], references: [id])
+  // 'anthropic' | 'openai'. The cipher column keeps its original name; it holds the key of `provider`.
+  provider           String    @default("anthropic") @db.VarChar(20)
   anthropicKeyCipher String?   @db.Text
   keyLast4           String?
   lastError          String?   @db.VarChar(500)

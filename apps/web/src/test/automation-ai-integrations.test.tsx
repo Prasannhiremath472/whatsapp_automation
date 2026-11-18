@@ -124,26 +124,63 @@ describe("Automations", () => {
 describe("AI agents", () => {
   beforeEach(() => {
     routes["GET /ai/agents"] = () => ({ body: [agent] });
-    routes["GET /ai/settings"] = () => ({ body: { hasKey: true, keyLast4: "ab12", lastError: null, lastErrorAt: null } });
+    routes["GET /ai/settings"] = () => ({ body: { provider: "anthropic", hasKey: true, keyLast4: "ab12", lastError: null, lastErrorAt: null } });
   });
 
   it("shows the key status without the key, usage and knowledge", async () => {
     renderPage(<AiAgentsPage />);
-    expect(await screen.findByText("Key ending in ab12")).toBeTruthy();
+    expect(await screen.findByText("Anthropic (Claude) · key ending in ab12")).toBeTruthy();
     expect(screen.getByText("Opening hours")).toBeTruthy();
     expect(screen.getByText(/12 replies · 2 handed over/)).toBeTruthy();
   });
 
-  it("saves a new API key", async () => {
-    routes["GET /ai/settings"] = () => ({ body: { hasKey: false, keyLast4: null, lastError: null, lastErrorAt: null } });
+  it("saves a new Anthropic key by default", async () => {
+    routes["GET /ai/settings"] = () => ({ body: { provider: "anthropic", hasKey: false, keyLast4: null, lastError: null, lastErrorAt: null } });
     routes["PUT /ai/settings/key"] = () => ({ body: { hasKey: true } });
     renderPage(<AiAgentsPage />);
-    const input = await screen.findByLabelText("Anthropic API key");
+    const input = await screen.findByLabelText("API key");
     const save = screen.getByRole("button", { name: "Save key" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     fireEvent.change(input, { target: { value: "sk-ant-api03-" + "x".repeat(30) } });
     fireEvent.click(save);
-    await waitFor(() => expect(calls.find((c) => c.key === "PUT /ai/settings/key")?.body).toEqual({ apiKey: "sk-ant-api03-" + "x".repeat(30) }));
+    await waitFor(() => expect(calls.find((c) => c.key === "PUT /ai/settings/key")?.body).toEqual({ provider: "anthropic", apiKey: "sk-ant-api03-" + "x".repeat(30) }));
+  });
+
+  it("lets you connect OpenAI instead", async () => {
+    routes["GET /ai/settings"] = () => ({ body: { provider: "anthropic", hasKey: false, keyLast4: null, lastError: null, lastErrorAt: null } });
+    routes["PUT /ai/settings/key"] = () => ({ body: { hasKey: true } });
+    renderPage(<AiAgentsPage />);
+    fireEvent.change(await screen.findByLabelText("Provider"), { target: { value: "openai" } });
+    expect(screen.getByText(/platform.openai.com\/api-keys/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-proj-" + "y".repeat(30) } });
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    await waitFor(() => expect(calls.find((c) => c.key === "PUT /ai/settings/key")?.body).toEqual({ provider: "openai", apiKey: "sk-proj-" + "y".repeat(30) }));
+  });
+
+  it("warns before switching provider when a key is already saved", async () => {
+    const confirmSpy = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirmSpy);
+    routes["PUT /ai/settings/key"] = () => ({ body: {} });
+    renderPage(<AiAgentsPage />);
+    await screen.findByText("Anthropic (Claude) · key ending in ab12"); // wait until the saved key is known
+    fireEvent.change(await screen.findByLabelText("Provider"), { target: { value: "openai" } });
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-proj-" + "y".repeat(30) } });
+    fireEvent.click(screen.getByRole("button", { name: "Switch to OpenAI" }));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringMatching(/paused and moved to gpt-4o-mini/));
+    expect(calls.some((c) => c.key === "PUT /ai/settings/key")).toBe(false); // cancelled
+  });
+
+  it("offers the connected provider's models when editing an agent", async () => {
+    routes["GET /ai/settings"] = () => ({ body: { provider: "openai", hasKey: true, keyLast4: "ab12", lastError: null, lastErrorAt: null } });
+    routes["GET /ai/agents"] = () => ({ body: [{ ...agent, model: "gpt-4o-mini" }] });
+    renderPage(<AiAgentsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit$/ }));
+    const select = (await screen.findByLabelText(/^Model \(/)) as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.value);
+    expect(options).toEqual(expect.arrayContaining(["gpt-4o-mini", "gpt-4o", "__custom"]));
+    expect(options.some((o) => o.startsWith("claude-"))).toBe(false);
+    fireEvent.change(select, { target: { value: "__custom" } });
+    expect(screen.getByLabelText("Model name")).toBeTruthy();
   });
 
   it("turns the agent on", async () => {
@@ -154,7 +191,7 @@ describe("AI agents", () => {
   });
 
   it("cannot be turned on without a key", async () => {
-    routes["GET /ai/settings"] = () => ({ body: { hasKey: false, keyLast4: null, lastError: null, lastErrorAt: null } });
+    routes["GET /ai/settings"] = () => ({ body: { provider: "anthropic", hasKey: false, keyLast4: null, lastError: null, lastErrorAt: null } });
     renderPage(<AiAgentsPage />);
     const toggle = (await screen.findByRole("switch", { name: "Asha answers customers" })) as HTMLButtonElement;
     expect(toggle.disabled).toBe(true);
