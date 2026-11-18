@@ -41,7 +41,7 @@ export class TemplatesController {
   @Post('sync')
   @HttpCode(200)
   @Roles('tenant_admin')
-  sync(@TenantId() tenantId: string): Promise<{ created: number; updated: number }> {
+  sync(@TenantId() tenantId: string): Promise<{ created: number; updated: number; flagged: number }> {
     return this.templates.syncFromMeta(tenantId);
   }
 

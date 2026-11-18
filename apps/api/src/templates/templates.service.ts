@@ -58,6 +58,9 @@ function mapMetaEvent(event: string): { status: TemplateStatus; reason?: string 
   }
 }
 
+export const NOT_ON_META_REASON =
+  'Not found on your connected WhatsApp Business Account (it may belong to a different account). Create it in WhatsApp Manager or submit it again, then use "Sync from Meta".';
+
 @Injectable()
 export class TemplatesService {
   private readonly logger = new Logger(TemplatesService.name);
@@ -228,7 +231,7 @@ export class TemplatesService {
   }
 
   /** Pulls the templates that exist on the WhatsApp Business Account into this tenant. */
-  async syncFromMeta(tenantId: string): Promise<{ created: number; updated: number }> {
+  async syncFromMeta(tenantId: string): Promise<{ created: number; updated: number; flagged: number }> {
     const connection = await this.prisma.whatsappConnection.findUnique({ where: { tenantId } });
     if (!connection || connection.connectionStatus !== 'connected') {
       throw new BadRequestException('Connect a WhatsApp account first');
@@ -275,7 +278,38 @@ export class TemplatesService {
         created += 1;
       }
     }
-    return { created, updated };
+
+    const flagged = connection.isMock ? 0 : await this.flagTemplatesMissingFromMeta(tenantId, remote);
+    return { created, updated, flagged };
+  }
+
+  /**
+   * Templates Genie shows as approved/pending but that do not exist on the
+   * connected WhatsApp Business Account (typically left over from a different
+   * account, such as Meta's test account) can never be sent: Meta answers
+   * "template does not exist" (error 132001). Mark them unusable with a clear
+   * reason. They come back automatically if they later appear on Meta.
+   */
+  private async flagTemplatesMissingFromMeta(tenantId: string, remote: { name: string; language: string }[]): Promise<number> {
+    const onMeta = new Set(remote.map((r) => `${r.name}\u0000${r.language}`));
+    // A template submitted a moment ago may not be listed by Meta yet.
+    const recentlySubmitted = new Date(Date.now() - 10 * 60_000);
+    const candidates = await this.prisma.messageTemplate.findMany({
+      where: { tenantId, status: { in: ['approved', 'pending'] } },
+    });
+    const missing = candidates.filter(
+      (t) => !onMeta.has(`${t.name}\u0000${t.language}`) && !(t.submittedAt && t.submittedAt > recentlySubmitted),
+    );
+    for (const t of missing) {
+      await this.prisma.messageTemplate.update({
+        where: { id: t.id },
+        data: { status: 'rejected', rejectionReason: NOT_ON_META_REASON },
+      });
+    }
+    if (missing.length > 0) {
+      this.logger.warn(`Flagged ${missing.length} template(s) missing from the WhatsApp account tenantId=${tenantId}: ${missing.map((t) => t.name).join(', ')}`);
+    }
+    return missing.length;
   }
 
   /**

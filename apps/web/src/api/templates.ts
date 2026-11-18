@@ -100,7 +100,7 @@ export function useSyncTemplates() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      api<{ created: number; updated: number }>("/message-templates/sync", { method: "POST" }),
+      api<{ created: number; updated: number; flagged: number }>("/message-templates/sync", { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: key }),
   });
 }

@@ -166,8 +166,14 @@ export default function TemplatesPage() {
 
   const sync = async () => {
     try {
-      const { created, updated } = await syncTemplates.mutateAsync();
+      const { created, updated, flagged } = await syncTemplates.mutateAsync();
       toast.success(`Synced from Meta: ${created} new, ${updated} updated`);
+      if (flagged > 0) {
+        toast.warning(
+          `${flagged} template${flagged === 1 ? " is" : "s are"} not on your WhatsApp account and can no longer be used. They are marked Rejected with the reason.`,
+          { duration: 10_000 },
+        );
+      }
     } catch (err) {
       toast.error(errorMessage(err));
     }
