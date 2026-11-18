@@ -28,15 +28,9 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { contactName, useConversations } from "@/api/inbox";
 import { useAuth, useSession } from "@/lib/auth";
 import { allNav } from "./nav";
-
-const notifications = [
-  { title: "Campaign “Diwali Sale” completed", time: "5 min ago", unread: true },
-  { title: "12 new conversations in Inbox", time: "32 min ago", unread: true },
-  { title: "Template “order_update” approved", time: "2 h ago", unread: false },
-  { title: "Weekly analytics report is ready", time: "Yesterday", unread: false },
-];
 
 export function AppHeader() {
   const location = useLocation();
@@ -44,8 +38,9 @@ export function AppHeader() {
   const navigate = useNavigate();
   const { tenant, user } = useSession();
   const { logout } = useAuth();
+  const unread = (useConversations().data ?? []).filter((c) => c.unreadCount > 0);
   const initials = user.displayName
-    .split(/s+/)
+    .split(/\s+/)
     .map((p) => p[0])
     .join("")
     .slice(0, 2)
@@ -92,20 +87,21 @@ export function AppHeader() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
               <Bell className="h-4 w-4" />
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary ring-2 ring-card" />
+              {unread.length > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary ring-2 ring-card" />}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-80">
             <DropdownMenuLabel className="flex items-center justify-between">
-              Notifications <span className="text-xs font-normal text-primary">2 new</span>
+              Notifications {unread.length > 0 && <span className="text-xs font-normal text-primary">{unread.length} unread</span>}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {notifications.map((n) => (
-              <DropdownMenuItem key={n.title} className="items-start gap-3 py-2.5">
-                <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.unread ? "bg-primary" : "bg-border"}`} />
-                <div>
-                  <div className="text-sm">{n.title}</div>
-                  <div className="text-xs text-muted-foreground">{n.time}</div>
+            {unread.length === 0 && <div className="px-3 py-4 text-center text-sm text-muted-foreground">You are all caught up.</div>}
+            {unread.slice(0, 6).map((c) => (
+              <DropdownMenuItem key={c.id} className="items-start gap-3 py-2.5" onClick={() => navigate("/inbox")}>
+                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
+                <div className="min-w-0">
+                  <div className="truncate text-sm">{contactName(c.contact)}</div>
+                  <div className="truncate text-xs text-muted-foreground">{c.lastMessage?.preview ?? "New message"}</div>
                 </div>
               </DropdownMenuItem>
             ))}

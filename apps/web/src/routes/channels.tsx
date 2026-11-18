@@ -1,2 +1,3 @@
-import { DeveloperPage } from '@/components/genie/DeveloperPages';
-export default function Page() { return <DeveloperPage section={'Channels'} />; }
+import { ChannelsPage } from "@/components/developer/DeveloperPages";
+
+export default ChannelsPage;

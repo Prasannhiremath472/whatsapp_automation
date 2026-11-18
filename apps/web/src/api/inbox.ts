@@ -22,6 +22,8 @@ export interface InboxConversation {
   unreadCount: number;
   /** When free-form replies stop being allowed (24 h after the customer's last message). */
   windowExpiresAt: string | null;
+  /** True once a person joined the chat (or the AI handed it over): the AI agent stays quiet. */
+  aiPaused: boolean;
   contact: {
     id: string;
     waId: string;
@@ -164,6 +166,15 @@ export function useAssignConversation() {
   return useMutation({
     mutationFn: ({ id, agentUserId }: { id: string; agentUserId: string | null }) =>
       api(`/conversations/${id}/assign`, { method: "PATCH", body: { agentUserId } }),
+    onSuccess: refresh,
+  });
+}
+
+export function useSetConversationAi() {
+  const refresh = useRefreshInbox();
+  return useMutation({
+    mutationFn: ({ id, paused }: { id: string; paused: boolean }) =>
+      api(`/conversations/${id}/ai`, { method: "PATCH", body: { paused } }),
     onSuccess: refresh,
   });
 }

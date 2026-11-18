@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Check, ChevronsUpDown, LogOut, MessageCircle, Plus, User, CreditCard } from "lucide-react";
+import { Check, ChevronsUpDown, LogOut, MessageCircle, Settings, User } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -24,7 +24,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useConversations } from "@/api/inbox";
-import { useSession } from "@/lib/auth";
+import { useWhatsappAccounts } from "@/api/whatsapp";
+import { useAuth, useSession } from "@/lib/auth";
 import { toast } from "sonner";
 import { useState } from "react";
 import { mainNav, businessNav, developerNav, secondaryNav, type NavItem } from "./nav";
@@ -49,11 +50,31 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
+/** The connected WhatsApp number, or a prompt to connect one. */
+function WhatsappStatus() {
+  const accounts = useWhatsappAccounts();
+  const account = accounts.data?.[0];
+  const connected = account?.status === "connected";
+  return (
+    <Link to="/whatsapp-accounts" className="block rounded-lg border bg-primary-soft/60 p-3 group-data-[collapsible=icon]:hidden">
+      <div className="flex items-center gap-2 text-xs font-medium">
+        <span className={`h-2 w-2 rounded-full ${connected ? "bg-primary" : "bg-warning"}`} />
+        {accounts.isPending ? "Checking WhatsApp…" : connected ? "WhatsApp connected" : "WhatsApp not connected"}
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        {connected ? (account?.displayPhoneNumber ?? account?.phoneNumberId) : accounts.isPending ? "" : "Connect your number to start"}
+      </p>
+    </Link>
+  );
+}
+
 export function AppSidebar() {
   const location = useLocation();
   const path = location.pathname;
-  const { tenant } = useSession();
-  const navigate=useNavigate();
+  const { tenant, user } = useSession();
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+  const initials = user.displayName.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase();
   const workspace = tenant.name;
   const isActive = (url: string) => (url === "/" ? path === "/" : path.startsWith(url));
 
@@ -110,16 +131,7 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="gap-2 p-3">
-        <div className="rounded-lg border bg-primary-soft/60 p-3 group-data-[collapsible=icon]:hidden">
-          <div className="flex items-center gap-2 text-xs font-medium">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-            </span>
-            Demo workspace
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">+1 202 555 0100 · fictional</p>
-        </div>
+        <WhatsappStatus />
         <SidebarMenu className="gap-0.5">
           {secondaryNav.map((item) => (
             <NavLink key={item.url} item={item} active={isActive(item.url)} />
@@ -129,27 +141,27 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <SidebarMenuButton className="h-11" tooltip="Admin">
+                <SidebarMenuButton className="h-11" tooltip={user.displayName}>
                   <Avatar className="h-7 w-7">
-                    <AvatarFallback className="bg-primary-soft text-xs font-semibold text-primary">AP</AvatarFallback>
+                    <AvatarFallback className="bg-primary-soft text-xs font-semibold text-primary">{initials}</AvatarFallback>
                   </Avatar>
                   <div className="flex min-w-0 flex-col text-left leading-tight">
-                    <span className="truncate text-sm font-medium">Admin</span>
-                    <span className="truncate text-[11px] text-muted-foreground">Owner</span>
+                    <span className="truncate text-sm font-medium">{user.displayName}</span>
+                    <span className="truncate text-[11px] text-muted-foreground">{user.role === "tenant_admin" ? "Business admin" : "Agent"}</span>
                   </div>
                   <ChevronsUpDown className="ml-auto h-4 w-4 text-muted-foreground" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start" className="w-56">
                 <DropdownMenuLabel>
-                  <div className="text-sm">Admin</div>
-                  <div className="text-xs font-normal text-muted-foreground">admin@brightminds.example</div>
+                  <div className="truncate text-sm">{user.displayName}</div>
+                  <div className="truncate text-xs font-normal text-muted-foreground">{user.email}</div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={()=>navigate("/profile")}><User className="h-4 w-4" /> Profile</DropdownMenuItem>
-                <DropdownMenuItem onClick={()=>navigate("/settings")}><CreditCard className="h-4 w-4" /> Billing</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate("/profile")}><User className="h-4 w-4" /> Profile</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate("/settings")}><Settings className="h-4 w-4" /> Settings</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={()=>toast.info("Demo workspace — no account is signed in.")} className="text-destructive"><LogOut className="h-4 w-4" /> Log out</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void logout()} className="text-destructive"><LogOut className="h-4 w-4" /> Sign out</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>

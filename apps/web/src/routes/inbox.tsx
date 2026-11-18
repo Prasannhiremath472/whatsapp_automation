@@ -11,6 +11,7 @@ import {
   useMarkRead,
   useMessages,
   useSendText,
+  useSetConversationAi,
   useSetConversationStatus,
   useTeamMembers,
   type InboxConversation,
@@ -21,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SendTemplateDialog } from "@/components/inbox/SendTemplateDialog";
 import { DeliveryTick } from "@/components/whatsapp/TemplatePreview";
@@ -72,6 +74,7 @@ export default function InboxPage() {
   const markRead = useMarkRead();
   const setStatus = useSetConversationStatus();
   const assign = useAssignConversation();
+  const setAi = useSetConversationAi();
   const updateContact = useUpdateContact();
 
   const [query, setQuery] = useState("");
@@ -493,6 +496,25 @@ export default function InboxPage() {
                     </option>
                   ))}
               </select>
+            </label>
+            <label className="flex items-center justify-between gap-3 text-xs font-medium">
+              <span>
+                AI agent replies
+                <span className="block font-normal text-muted-foreground">
+                  {active.aiPaused ? "Off for this chat: a person is handling it." : "On, if an AI agent is active."}
+                </span>
+              </span>
+              <Switch
+                aria-label="AI agent replies in this chat"
+                checked={!active.aiPaused}
+                disabled={setAi.isPending}
+                onCheckedChange={(on) =>
+                  setAi.mutate(
+                    { id: active.id, paused: !on },
+                    { onError: (err) => apiError(err, "Could not change the AI setting") },
+                  )
+                }
+              />
             </label>
             {active.contact.email && (
               <p className="break-all text-xs text-muted-foreground">{active.contact.email}</p>

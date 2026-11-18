@@ -1,2 +1,3 @@
-import { DeveloperPage } from '@/components/genie/DeveloperPages';
-export default function Page() { return <DeveloperPage section={'API Logs'} />; }
+import { ApiLogsPage } from "@/components/developer/DeveloperPages";
+
+export default ApiLogsPage;

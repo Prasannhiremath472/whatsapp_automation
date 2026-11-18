@@ -1,2 +1,3 @@
-import { IntegrationsPage } from '@/components/genie/BusinessPages';
+import { IntegrationsPage } from "@/components/integrations/IntegrationsPage";
+
 export default IntegrationsPage;

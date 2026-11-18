@@ -1,2 +1,3 @@
-import { AutomationsPage } from '@/components/genie/AutomationsPage';
+import { AutomationsPage } from "@/components/automation/AutomationsPage";
+
 export default AutomationsPage;

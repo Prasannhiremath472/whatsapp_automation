@@ -1,2 +1,3 @@
-import { AgentsPage } from '@/components/genie/AgentsPage';
-export default AgentsPage;
+import { AiAgentsPage } from "@/components/ai/AiAgentsPage";
+
+export default AiAgentsPage;

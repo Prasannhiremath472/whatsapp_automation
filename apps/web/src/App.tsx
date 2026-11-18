@@ -5,7 +5,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AppHeader } from "@/components/layout/AppHeader";
-import { DemoProvider } from "@/components/genie/DemoProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { ApiError } from "@/lib/api";
 import { AuthProvider } from "@/lib/auth";
@@ -67,7 +66,7 @@ function NotFound() {
 }
 
 function AppLayout() {
-  return <DemoProvider><SidebarProvider><AppSidebar /><SidebarInset className="min-w-0 bg-background"><AppHeader /><main className="mx-auto w-full max-w-[1440px] flex-1 p-4 md:p-6 lg:p-8"><RouteTitle /><Routes>
+  return <SidebarProvider><AppSidebar /><SidebarInset className="min-w-0 bg-background"><AppHeader /><main className="mx-auto w-full max-w-[1440px] flex-1 p-4 md:p-6 lg:p-8"><RouteTitle /><Routes>
     <Route path="/" element={<DashboardPage />} />
     <Route path="/inbox" element={<InboxPage />} />
     <Route path="/contacts" element={<ContactsPage />} />
@@ -89,7 +88,7 @@ function AppLayout() {
     <Route path="/settings" element={<SettingsPage />} />
     <Route path="/profile" element={<ProfilePage />} />
     <Route path="*" element={<NotFound />} />
-  </Routes></main></SidebarInset></SidebarProvider></DemoProvider>;
+  </Routes></main></SidebarInset></SidebarProvider>;
 }
 
 export default function App() {

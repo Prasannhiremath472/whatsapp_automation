@@ -1,2 +1,6 @@
-import { DeveloperPage } from '@/components/genie/DeveloperPages';
-export default function Page() { return <DeveloperPage section={'Webhooks'} />; }
+import { Navigate } from "react-router-dom";
+
+/** Webhooks are managed on the Integrations page. */
+export default function WebhooksRedirect() {
+  return <Navigate to="/integrations" replace />;
+}

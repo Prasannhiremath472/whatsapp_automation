@@ -1,2 +1,3 @@
-import { HelpPage } from '@/components/genie/OverviewPages';
+import { HelpPage } from "@/components/support/HelpPage";
+
 export default HelpPage;
