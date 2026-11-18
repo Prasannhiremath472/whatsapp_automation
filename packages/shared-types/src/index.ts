@@ -8,3 +8,8 @@ export * from "./common.types";
 export * from "./contact.types";
 export * from "./template.types";
 export * from "./whatsapp-account.types";
+export * from "./automation.types";
+export * from "./ai.types";
+export * from "./webhook-endpoint.types";
+export * from "./developer.types";
+export * from "./support.types";

@@ -78,3 +78,6 @@ export function describeMessage(messageType: string, content: unknown): string {
       return str(c["body"]) || str(c["text"]) || messageType.replace(/_/g, " ");
   }
 }
+
+/** DTO for PATCH /conversations/:id/ai (turn the AI agent off or on for one chat) */
+export const SetConversationAiRequestSchema = z.object({ paused: z.boolean() });

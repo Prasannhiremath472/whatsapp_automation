@@ -32,26 +32,26 @@ Known limits of this phase
 | Users & Teams ✅ | Done: list, add user (admin sets the password), change role, deactivate/reactivate (signs them out), admin password reset, last-admin protection. Not yet: teams/groups, invitation emails, fine-grained permissions |
 | Profile, Settings ✅ | Done: edit own name, change password (ends all sessions), business name/category/time zone (`PATCH /tenants/me`). Not yet: notification and AI preferences, billing |
 | Dashboard, Analytics ✅ | Done: `GET /analytics/overview?range=today\|7d\|30d\|90d` (messages, delivery, conversations, first-reply time, contact growth, campaign funnel, per-day series in the business time zone) and CSV export. Not yet: per-account/campaign/agent filters, AI metrics |
-| Help & Support | Create support ticket → shared with admin Tickets (Phase 5) |
+| Help & Support ✅ | Done: tickets (`/support/tickets`: open, reply, close, reopen on reply) shared by the whole business, plus quick guides. Support-team replies need the admin panel backend (Phase 5) |
 
 ## Phase 3 — Developer platform ⬜
 
 | Screen | Needs |
 | --- | --- |
-| API Keys | `api_keys` table (hashed, scoped, expiring), key-auth guard, usage counting |
-| Public API | `/public/v1/messages`, `/contacts`, `/templates` authenticated by API key |
-| Webhooks | Outbound subscriptions, HMAC-signed deliveries, retries, delivery log |
-| API Logs | Request log table (per key) with retention |
-| API Docs | Generate OpenAPI from the Zod schemas |
-| Channels | Per-channel config (WhatsApp now; others later) |
+| API Keys ✅ | Done: `gk_live_` keys, SHA-256 hashed, scoped, optional expiry, revoke, usage counting, shown once |
+| Public API ✅ | Done: `/public/v1/messages` (template or text), `/messages/:id`, `/contacts` (list, upsert), `/templates`; 120 requests/minute per key (per API instance) |
+| Webhooks ✅ | Done (see Integrations above): events message.received, message.status, conversation.created |
+| API Logs ✅ | Done: one row per call (no bodies), 30-day retention, filters and 24 h summary |
+| API Docs ✅ | Done: hand-written OpenAPI 3 served live at `/public/v1/openapi.json`, rendered in the app. Not generated from the Zod schemas |
+| Channels ✅ | Shows the WhatsApp number status; other channels are marked coming soon |
 
 ## Phase 4 — Automation & AI ⬜
 
 | Screen | Needs |
 | --- | --- |
-| Automations | Flow model (nodes/edges JSON) + execution engine (the existing `automation` module only has auto-reply rules) |
-| AI Agents | LLM provider abstraction, knowledge sources (FAQ/PDF → chunks), conversation handoff to humans, token metering |
-| Integrations | Per-integration OAuth/config store |
+| Automations ✅ | Done as rules, not a visual flow builder: trigger (first message / keyword / any message) + ordered steps (send text, send template, tag, assign, set status, wait, pause AI). One automation runs per message; cooldown per chat; waits survive restarts (MySQL-backed scheduler); run history. The old hard-coded school auto-reply is removed. Not yet: branching/conditions, visual canvas, more triggers (inactivity, business hours, tags) |
+| AI Agents ✅ | Done with Claude only: each business uses its own Anthropic key (encrypted), agents with instructions + knowledge entries, hand-over to a person (tool call), per-chat on/off, test chat, usage metering. Not yet: PDF/website knowledge import, retrieval over large knowledge, other LLM providers, spend limits |
+| Integrations 🟡 | Outgoing webhooks are real (signed, retried, delivery log, SSRF-safe) and work with Zapier/Make/n8n. Shopify, WooCommerce, Google Sheets, HubSpot, Zoho, Salesforce are shown as coming soon (no OAuth built) |
 | Commerce bot | Existing backend (catalog, orders, flow). Its old admin screens were in the replaced web app — recoverable from git history (`apps/web/src/pages/CatalogAdminPage.tsx`) and need a home in the new UI |
 
 ## Phase 5 — Super-admin backend ⬜

@@ -4,6 +4,7 @@ import {
   AssignConversationRequestSchema,
   SendMessageRequestSchema,
   SendTemplateMessageRequestSchema,
+  SetConversationAiRequestSchema,
   UpdateConversationStatusRequestSchema,
   describeMessage,
 } from '@whatsapp-crm/shared-types';
@@ -150,6 +151,20 @@ export class InboxController {
     }
     const input = SendTemplateMessageRequestSchema.parse(body);
     return this.inboxService.sendTemplateMessage(tenantId, conversationId, user.sub, input);
+  }
+
+  @Roles('tenant_admin', 'agent')
+  @Patch(':id/ai')
+  async setAi(
+    @CurrentTenant() tenantId: string | null,
+    @Param('id') conversationId: string,
+    @Body() body: unknown,
+  ): Promise<Conversation> {
+    if (!tenantId) {
+      throw new ForbiddenException('This account is not associated with a tenant');
+    }
+    const input = SetConversationAiRequestSchema.parse(body);
+    return this.inboxService.setAiPaused(tenantId, conversationId, input.paused);
   }
 
   @Roles('tenant_admin', 'agent')

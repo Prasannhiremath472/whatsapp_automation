@@ -146,7 +146,7 @@ export class InboxService {
     }
   }
 
-  private async findOrCreateOpenConversation(
+  async findOrCreateOpenConversation(
     tenantId: string,
     contactId: string,
     connectionId: string,
@@ -310,7 +310,7 @@ export class InboxService {
 
     const updatedConversation = await this.prisma.conversation.update({
       where: { id: conversation.id },
-      data: { lastMessageAt: new Date() },
+      data: { lastMessageAt: new Date(), aiPaused: true }, // a person has joined the chat: the AI agent stays quiet
       include: { contact: true },
     });
 
@@ -326,7 +326,8 @@ export class InboxService {
   async sendTemplateMessage(
     tenantId: string,
     conversationId: string,
-    senderUserId: string,
+    /** The team member sending it, or null when an automation sends it. */
+    senderUserId: string | null,
     input: SendTemplateMessageRequest,
   ): Promise<Message> {
     const conversation = await this.findConversationOrThrow(tenantId, conversationId);
@@ -363,8 +364,8 @@ export class InboxService {
         tenantId,
         conversationId: conversation.id,
         direction: 'outbound',
-        senderType: 'agent',
-        senderUserId,
+        senderType: senderUserId ? 'agent' : 'bot',
+        ...(senderUserId ? { senderUserId } : {}),
         messageType: 'template',
         content: {
           templateName: template.name,
@@ -394,7 +395,7 @@ export class InboxService {
 
     const updatedConversation = await this.prisma.conversation.update({
       where: { id: conversation.id },
-      data: { lastMessageAt: new Date() },
+      data: { lastMessageAt: new Date(), ...(senderUserId ? { aiPaused: true } : {}) },
       include: { contact: true },
     });
     this.events.emit(INBOX_EVENTS.MESSAGE_NEW, { tenantId, message, conversation: updatedConversation });
@@ -416,6 +417,18 @@ export class InboxService {
     const expires = new Date(lastInbound.createdAt.getTime() + REPLY_WINDOW_MS);
     await this.prisma.conversation.update({ where: { id: conversation.id }, data: { windowExpiresAt: expires } });
     return expires;
+  }
+
+  /** Turns the AI agent off (or back on) for one conversation. */
+  async setAiPaused(tenantId: string, conversationId: string, paused: boolean): Promise<Conversation> {
+    await this.findConversationOrThrow(tenantId, conversationId);
+    const conversation = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { aiPaused: paused },
+      include: { contact: true },
+    });
+    this.events.emit(INBOX_EVENTS.CONVERSATION_UPDATED, { tenantId, conversation });
+    return conversation;
   }
 
   /** Marks everything in the conversation as read by the team (clears the unread badge). */

@@ -4,7 +4,7 @@ import { raw } from 'express';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 /** Routes that must stay at a fixed, unversioned URL. */
-const UNVERSIONED_ROUTES = ['webhook', 'dev/(.*)', 'files/(.*)'];
+const UNVERSIONED_ROUTES = ['webhook', 'dev/(.*)', 'files/(.*)', 'public/(.*)'];
 
 /**
  * Shared HTTP configuration used by main.ts and by e2e tests, so tests hit the
