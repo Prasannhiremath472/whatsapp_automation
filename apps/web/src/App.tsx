@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -11,26 +11,33 @@ import { AuthProvider } from "@/lib/auth";
 import { RequireAuth } from "@/lib/RequireAuth";
 import LoginPage from "@/routes/login";
 
-import DashboardPage from "@/routes/index";
-import InboxPage from "@/routes/inbox";
-import ContactsPage from "@/routes/contacts";
-import CampaignsPage from "@/routes/campaigns";
-import TemplatesPage from "@/routes/templates";
-import AutomationsPage from "@/routes/automation";
-import AgentsPage from "@/routes/ai-agents";
-import AnalyticsPage from "@/routes/analytics";
-import AccountsPage from "@/routes/whatsapp-accounts";
-import TeamsPage from "@/routes/teams";
-import IntegrationsPage from "@/routes/integrations";
-import DeveloperPage from "@/routes/developer";
-import ChannelsPage from "@/routes/channels";
-import ApiKeysPage from "@/routes/api-keys";
-import WebhooksPage from "@/routes/webhooks";
-import ApiLogsPage from "@/routes/api-logs";
-import ApiDocsPage from "@/routes/api-docs";
-import HelpPage from "@/routes/help";
-import SettingsPage from "@/routes/settings";
-import ProfilePage from "@/routes/profile";
+// Each page is loaded on demand (its own chunk) instead of being bundled into
+// the first download: the sign-in screen no longer ships every dashboard page
+// plus their chart/flow libraries.
+const DashboardPage = lazy(() => import("@/routes/index"));
+const InboxPage = lazy(() => import("@/routes/inbox"));
+const ContactsPage = lazy(() => import("@/routes/contacts"));
+const CampaignsPage = lazy(() => import("@/routes/campaigns"));
+const TemplatesPage = lazy(() => import("@/routes/templates"));
+const AutomationsPage = lazy(() => import("@/routes/automation"));
+const AgentsPage = lazy(() => import("@/routes/ai-agents"));
+const AnalyticsPage = lazy(() => import("@/routes/analytics"));
+const AccountsPage = lazy(() => import("@/routes/whatsapp-accounts"));
+const TeamsPage = lazy(() => import("@/routes/teams"));
+const IntegrationsPage = lazy(() => import("@/routes/integrations"));
+const DeveloperPage = lazy(() => import("@/routes/developer"));
+const ChannelsPage = lazy(() => import("@/routes/channels"));
+const ApiKeysPage = lazy(() => import("@/routes/api-keys"));
+const WebhooksPage = lazy(() => import("@/routes/webhooks"));
+const ApiLogsPage = lazy(() => import("@/routes/api-logs"));
+const ApiDocsPage = lazy(() => import("@/routes/api-docs"));
+const HelpPage = lazy(() => import("@/routes/help"));
+const SettingsPage = lazy(() => import("@/routes/settings"));
+const ProfilePage = lazy(() => import("@/routes/profile"));
+
+function PageFallback() {
+  return <div className="p-6 text-sm text-muted-foreground" role="status">Loading…</div>;
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -66,7 +73,7 @@ function NotFound() {
 }
 
 function AppLayout() {
-  return <SidebarProvider><AppSidebar /><SidebarInset className="min-w-0 bg-background"><AppHeader /><main className="mx-auto w-full max-w-[1440px] flex-1 p-4 md:p-6 lg:p-8"><RouteTitle /><Routes>
+  return <SidebarProvider><AppSidebar /><SidebarInset className="min-w-0 bg-background"><AppHeader /><main className="mx-auto w-full max-w-[1440px] flex-1 p-4 md:p-6 lg:p-8"><RouteTitle /><Suspense fallback={<PageFallback />}><Routes>
     <Route path="/" element={<DashboardPage />} />
     <Route path="/inbox" element={<InboxPage />} />
     <Route path="/contacts" element={<ContactsPage />} />
@@ -88,7 +95,7 @@ function AppLayout() {
     <Route path="/settings" element={<SettingsPage />} />
     <Route path="/profile" element={<ProfilePage />} />
     <Route path="*" element={<NotFound />} />
-  </Routes></main></SidebarInset></SidebarProvider>;
+  </Routes></Suspense></main></SidebarInset></SidebarProvider>;
 }
 
 export default function App() {
